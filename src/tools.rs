@@ -7,8 +7,8 @@ pub fn crc32(data: &[u8], size: usize, start_value: u32) -> u32 {
     let mut crc: u32 = !start_value;
     for i in 0..size {
         let byte = data[i];
-        crc = CRC32_TABLE[((crc ^ (byte as u32)) as usize) & 0x0F] ^ (crc >> 4);
-        crc = CRC32_TABLE[((crc ^ (byte >> 4) as u32) as usize) & 0x0F] ^ (crc >> 4);
+        crc = CRC32_TABLE[((crc ^ (byte as u32)) & 0x0F) as usize] ^ (crc >> 4);
+        crc = CRC32_TABLE[((crc ^ (byte >> 4) as u32) & 0x0F) as usize] ^ (crc >> 4);
     }
     !crc
 }

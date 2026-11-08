@@ -16,8 +16,10 @@
   },
   "sandbox": {
     "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "failIfUnavailable": true,
     "network": {
-      "allowedDomains": ["crates.io", "static.crates.io", "github.com", "scrutinydebugger.com"]
+      "allowedDomains": ["crates.io", "static.crates.io", "github.com"]
     },
     "filesystem": {
       "allowWrite": ["~/.cargo/", "./target/"]

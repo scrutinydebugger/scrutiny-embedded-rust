@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build*)",
+      "Bash(cargo test*)",
+      "Bash(cargo clippy*)",
+      "Bash(cargo fmt*)",
+      "Bash(cargo check*)"
+    ],
+    "deny": [
+      "Bash(cargo add*)",
+      "Bash(cargo install*)",
+      "Bash(cargo remove*)",
+      "Bash(rustup*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": ["crates.io", "static.crates.io", "github.com", "scrutinydebugger.com"]
+    },
+    "filesystem": {
+      "allowWrite": ["~/.cargo/", "./target/"]
+    }
+  }
+}

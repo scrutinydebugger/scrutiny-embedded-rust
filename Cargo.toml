@@ -9,3 +9,7 @@ edition = "2021"
 
 [features]
 default = ["datalogging", "support_64bits", "protected_regions"]
+datalogging = []
+support_64bits = []
+protected_regions = []
+std = []

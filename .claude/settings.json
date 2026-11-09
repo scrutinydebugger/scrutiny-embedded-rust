@@ -18,6 +18,7 @@
     "enabled": true,
     "allowUnsandboxedCommands": false,
     "failIfUnavailable": true,
+    "excludedCommands": ["cargo"],
     "network": {
       "allowedDomains": ["crates.io", "static.crates.io", "github.com"]
     },

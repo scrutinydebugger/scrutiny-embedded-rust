@@ -169,15 +169,23 @@ impl<'buf> CommHandler<'buf> {
                         break;
                     }
 
-                    let available = data.len() - i;
-                    let missing = (self.active_request.data_length - self.per_state_counter) as usize;
+                    let available = match u16::try_from(data.len() - i) {
+                        Ok(n) => n,
+                        Err(_) => {
+                            self.rx_error = RxError::Overflow;
+                            self.rx_state = RxFsmState::Error;
+                            break;
+                        }
+                    };
+                    let missing = self.active_request.data_length - self.per_state_counter;
                     let to_read = available.min(missing);
+                    let to_read_usize = to_read as usize;
 
                     let dst = self.per_state_counter as usize;
-                    self.active_request.buffer[dst..dst + to_read].copy_from_slice(&data[i..i + to_read]);
-                    self.rx_crc = crc32(&data[i..i + to_read], self.rx_crc);
-                    self.per_state_counter += to_read as u16;
-                    i += to_read;
+                    self.active_request.buffer[dst..dst + to_read_usize].copy_from_slice(&data[i..i + to_read_usize]);
+                    self.rx_crc = crc32(&data[i..i + to_read_usize], self.rx_crc);
+                    self.per_state_counter += to_read;
+                    i += to_read_usize;
 
                     if self.per_state_counter >= self.active_request.data_length {
                         self.per_state_counter = 0;
@@ -208,12 +216,14 @@ impl<'buf> CommHandler<'buf> {
 
     /// Returns `true` if a complete, CRC-validated request is waiting to be processed.
     /// Stays `true` until [`wait_next_request`](Self::wait_next_request) is called.
-    pub fn request_received(&self) -> bool {
+    #[must_use]
+    pub const fn request_received(&self) -> bool {
         self.pending_request
     }
 
     /// Returns the pending request, or `None` if no request has been received yet.
-    pub fn get_request(&self) -> Option<&Request<'_>> {
+    #[must_use]
+    pub const fn get_request(&self) -> Option<&Request<'_>> {
         if !self.pending_request {
             return None;
         }
@@ -229,7 +239,7 @@ impl<'buf> CommHandler<'buf> {
     /// Set [`Response::command_id`], [`Response::subfunction_id`],
     /// [`Response::response_code`], [`Response::data_length`], and write payload
     /// bytes via [`Response::payload`], then call [`send_response`](Self::send_response).
-    pub fn prepare_response(&mut self) -> &mut Response<'buf> {
+    pub const fn prepare_response(&mut self) -> &mut Response<'buf> {
         self.active_response.reset();
         &mut self.active_response
     }
@@ -282,7 +292,7 @@ impl<'buf> CommHandler<'buf> {
         }
 
         let remaining = self.nbytes_to_send - self.nbytes_sent;
-        let to_copy = out.len().min(remaining as usize) as u16;
+        let to_copy = u16::try_from(out.len()).unwrap_or(0).min(remaining);
         let mut i = 0u16;
 
         // Header: cmd|0x80, subfn, code, len_hi, len_lo
@@ -333,6 +343,7 @@ impl<'buf> CommHandler<'buf> {
     }
 
     /// Returns the number of TX bytes still pending.
+    #[must_use]
     pub fn data_to_send(&self) -> u16 {
         if self.state != CommState::Transmitting {
             return 0;
@@ -365,18 +376,20 @@ impl<'buf> CommHandler<'buf> {
     }
 
     /// Returns `true` if a session with the server is active.
-    pub fn is_connected(&self) -> bool {
+    #[must_use]
+    pub const fn is_connected(&self) -> bool {
         self.session_active
     }
 
     /// Returns the session ID assigned at the last successful [`connect`](Self::connect).
-    pub fn get_session_id(&self) -> u32 {
+    #[must_use]
+    pub const fn get_session_id(&self) -> u32 {
         self.session_id
     }
 
     /// Resets the heartbeat watchdog.  `challenge` must differ from the previous
     /// call; a repeated value is silently ignored and returns `false`.
-    pub fn heartbeat(&mut self, challenge: u16, tb: &Timebase) -> bool {
+    pub const fn heartbeat(&mut self, challenge: u16, tb: &Timebase) -> bool {
         if !self.session_active || !self.enabled {
             return false;
         }
@@ -398,22 +411,25 @@ impl<'buf> CommHandler<'buf> {
     }
 
     /// `true` while a response is being streamed out.
+    #[must_use]
     pub fn transmitting(&self) -> bool {
         self.state == CommState::Transmitting
     }
 
     /// `true` while a request frame is being assembled.
+    #[must_use]
     pub fn receiving(&self) -> bool {
         self.state == CommState::Receiving
     }
 
     /// `true` if the handler has valid buffers and has not been disabled.
-    pub fn is_enabled(&self) -> bool {
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 
     /// Enables the handler.
-    pub fn enable(&mut self) {
+    pub const fn enable(&mut self) {
         self.enabled = true;
     }
 
@@ -424,21 +440,25 @@ impl<'buf> CommHandler<'buf> {
     }
 
     /// Last RX error code.
-    pub fn get_rx_error(&self) -> RxError {
+    #[must_use]
+    pub const fn get_rx_error(&self) -> RxError {
         self.rx_error
     }
 
     /// Last TX error code.
-    pub fn get_tx_error(&self) -> TxError {
+    #[must_use]
+    pub const fn get_tx_error(&self) -> TxError {
         self.tx_error
     }
 
     /// Size of the RX buffer in bytes.
+    #[must_use]
     pub fn rx_buffer_size(&self) -> u16 {
         u16::try_from(self.active_request.buffer.len()).unwrap_or(u16::MAX)
     }
 
     /// Size of the TX buffer in bytes.
+    #[must_use]
     pub fn tx_buffer_size(&self) -> u16 {
         u16::try_from(self.active_response.buffer.len()).unwrap_or(u16::MAX)
     }
@@ -483,10 +503,10 @@ impl<'buf> CommHandler<'buf> {
     }
 
     fn process_active_request(&mut self) {
-        let must_process = if !self.session_active {
-            self.is_discover_request() || self.is_connect_request()
-        } else {
+        let must_process = if self.session_active {
             true
+        } else {
+            self.is_discover_request() || self.is_connect_request()
         };
 
         if must_process {
@@ -510,13 +530,13 @@ impl<'buf> CommHandler<'buf> {
         self.active_request.buffer[..DISCOVER_MAGIC.len()] == DISCOVER_MAGIC
     }
 
-    fn is_connect_request(&self) -> bool {
+    const fn is_connect_request(&self) -> bool {
         self.active_request.command_id == CommandId::CommControl as u8
             && self.active_request.subfunction_id == CommControlSubfn::Connect as u8
     }
 
     fn is_valid_buffer_size(len: usize, min: u16, max: u16) -> bool {
-        u16::try_from(len).map_or(false, |s| s >= min && s <= max)
+        u16::try_from(len).is_ok_and(|s| s >= min && s <= max)
     }
 
     fn compute_response_crc(cmd: u8, subfn: u8, code: u8, data_len: u16, payload: &[u8]) -> u32 {

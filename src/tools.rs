@@ -1,15 +1,16 @@
 use crate::types::{AnyType, FloatBiggest, IntBiggest, UintBiggest, VariableType, VariableTypeSize, VariableTypeType};
 
 const CRC32_TABLE: [u32; 16] = [
-    0x00000000, 0x1DB71064, 0x3B6E20C8, 0x26D930AC, 0x76DC4190, 0x6B6B51F4, 0x4DB26158, 0x5005713C, 0xEDB88320,
-    0xF00F9344, 0xD6D6A3E8, 0xCB61B38C, 0x9B64C2B0, 0x86D3D2D4, 0xA00AE278, 0xBDBDF21C,
+    0x0000_0000, 0x1DB7_1064, 0x3B6E_20C8, 0x26D9_30AC, 0x76DC_4190, 0x6B6B_51F4, 0x4DB2_6158, 0x5005_713C, 0xEDB8_8320,
+    0xF00F_9344, 0xD6D6_A3E8, 0xCB61_B38C, 0x9B64_C2B0, 0x86D3_D2D4, 0xA00A_E278, 0xBDBD_F21C,
 ];
 
+#[must_use]
 pub fn crc32(data: &[u8], start_value: u32) -> u32 {
     let mut crc: u32 = !start_value;
     for &byte in data {
-        crc = CRC32_TABLE[((crc ^ (byte as u32)) & 0x0F) as usize] ^ (crc >> 4);
-        crc = CRC32_TABLE[((crc ^ (byte >> 4) as u32) & 0x0F) as usize] ^ (crc >> 4);
+        crc = CRC32_TABLE[((crc ^ u32::from(byte)) & 0x0F) as usize] ^ (crc >> 4);
+        crc = CRC32_TABLE[((crc ^ u32::from(byte >> 4)) & 0x0F) as usize] ^ (crc >> 4);
     }
     !crc
 }
@@ -22,10 +23,10 @@ pub trait TypeSize {
 impl TypeSize for VariableType {
     #[inline]
     fn type_size(&self) -> u8 {
-        if *self == VariableType::Unknown {
+        if *self == Self::Unknown {
             return 0;
         }
-        if *self == VariableType::Boolean {
+        if *self == Self::Boolean {
             return 1; // bool is always 1 byte in Rust; implementation-specific in C++
         }
         1 << ((*self as u8) & 0xF)
@@ -35,7 +36,7 @@ impl TypeSize for VariableType {
 impl TypeSize for VariableTypeSize {
     #[inline]
     fn type_size(&self) -> u8 {
-        if *self == VariableTypeSize::VTSundef {
+        if *self == Self::VTSundef {
             return 0;
         }
         1 << ((*self as u8) & 0xF)
@@ -47,82 +48,90 @@ pub enum Status {
     Error = 1,
 }
 
+#[must_use]
 #[inline]
 pub fn get_var_type_type(vt: VariableType) -> VariableTypeType {
     unsafe { core::mem::transmute((vt as u8) & 0xF0) }
 }
 
+#[must_use]
 #[inline]
 pub fn make_type(tt: VariableTypeType, ts: VariableTypeSize) -> VariableType {
     if tt == VariableTypeType::VTTundef || ts == VariableTypeSize::VTSundef {
         return VariableType::Unknown;
     }
 
-    return unsafe { core::mem::transmute((tt as u8) | (ts as u8)) };
+    unsafe { core::mem::transmute::<u8, VariableType>((tt as u8) | (ts as u8)) }
 }
 
 cfg_select! {
     feature = "support_64bits" => {
+        #[must_use]
         #[inline]
-        pub fn read_biggest_uint(v: &AnyType) -> UintBiggest {
+        pub const fn read_biggest_uint(v: &AnyType) -> UintBiggest {
             unsafe { v.uint64 }
         }
 
+        #[must_use]
         #[inline]
-        pub fn read_biggest_sint(v: &AnyType) -> IntBiggest{
+        pub const fn read_biggest_sint(v: &AnyType) -> IntBiggest {
             unsafe { v.sint64 }
         }
 
+        #[must_use]
         #[inline]
-        pub fn read_biggest_float(v: &AnyType) -> FloatBiggest{
+        pub const fn read_biggest_float(v: &AnyType) -> FloatBiggest {
             unsafe { v.float64 }
         }
 
         #[inline]
-        pub fn set_biggest_sint(v: &mut AnyType, val: IntBiggest){
+        pub const fn set_biggest_sint(v: &mut AnyType, val: IntBiggest) {
             v.sint64 = val;
         }
 
         #[inline]
-        pub fn set_biggest_uint(v: &mut AnyType, val: UintBiggest){
+        pub const fn set_biggest_uint(v: &mut AnyType, val: UintBiggest) {
             v.uint64 = val;
         }
 
         #[inline]
-        pub fn set_biggest_float(v: &mut AnyType, val: FloatBiggest){
+        pub const fn set_biggest_float(v: &mut AnyType, val: FloatBiggest) {
             v.float64 = val;
         }
 
     },
     _ => {
 
+        #[must_use]
         #[inline]
-        pub fn read_biggest_uint(v: &AnyType) -> UIntBiggest {
+        pub const fn read_biggest_uint(v: &AnyType) -> UintBiggest {
             unsafe { v.uint32 }
         }
 
+        #[must_use]
         #[inline]
-        pub fn read_biggest_sint(v: &AnyType) -> IntBiggest{
+        pub const fn read_biggest_sint(v: &AnyType) -> IntBiggest {
             unsafe { v.sint32 }
         }
 
+        #[must_use]
         #[inline]
-        pub fn read_biggest_float(v: &AnyType) -> FloatBiggest{
+        pub const fn read_biggest_float(v: &AnyType) -> FloatBiggest {
             unsafe { v.float32 }
         }
 
         #[inline]
-        pub fn set_biggest_sint(v: &mut AnyType, val: IntBiggest){
+        pub const fn set_biggest_sint(v: &mut AnyType, val: IntBiggest) {
             v.sint32 = val;
         }
 
         #[inline]
-        pub fn set_biggest_uint(v: &mut AnyType, val: UintBiggest){
+        pub const fn set_biggest_uint(v: &mut AnyType, val: UintBiggest) {
             v.uint32 = val;
         }
 
         #[inline]
-        pub fn set_biggest_float(v: &mut AnyType, val: FloatBiggest){
+        pub const fn set_biggest_float(v: &mut AnyType, val: FloatBiggest) {
             v.float32 = val;
         }
     }

@@ -2,7 +2,6 @@ use core::cfg_select;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-
 pub enum VariableTypeType {
     VTTsint = 0 << 4,
     VTTuint = 1 << 4,

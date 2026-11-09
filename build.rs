@@ -21,13 +21,13 @@ fn main() {
     let dl_encoding = read_datalogging_encoding("SCRUTINY_DATALOGGING_ENCODING", 0);
 
     let mut out = String::new();
-    writeln!(out, "pub const COMM_RX_TIMEOUT_US: u32 = {rx_timeout};").unwrap();
-    writeln!(out, "pub const COMM_HEARTBEAT_TIMEOUT_US: u32 = {hb_timeout};").unwrap();
-    writeln!(out, "pub const REQUEST_MAX_PROCESS_TIME_US: u32 = {max_process_time};").unwrap();
-    writeln!(out, "pub const PROTOCOL_VERSION_MAJOR: u8 = {proto_major} as u8;").unwrap();
-    writeln!(out, "pub const PROTOCOL_VERSION_MINOR: u8 = {proto_minor} as u8;").unwrap();
+    writeln!(out, "pub const COMM_RX_TIMEOUT_US: u32 = {};", sep(rx_timeout)).unwrap();
+    writeln!(out, "pub const COMM_HEARTBEAT_TIMEOUT_US: u32 = {};", sep(hb_timeout)).unwrap();
+    writeln!(out, "pub const REQUEST_MAX_PROCESS_TIME_US: u32 = {};", sep(max_process_time)).unwrap();
+    writeln!(out, "pub const PROTOCOL_VERSION_MAJOR: u8 = {proto_major}_u8;").unwrap();
+    writeln!(out, "pub const PROTOCOL_VERSION_MINOR: u8 = {proto_minor}_u8;").unwrap();
     writeln!(out, "#[cfg(feature = \"datalogging\")]").unwrap();
-    writeln!(out, "pub const DATALOGGING_MAX_SIGNAL: usize = {max_signal} as usize;").unwrap();
+    writeln!(out, "pub const DATALOGGING_MAX_SIGNAL: usize = {max_signal}_usize;").unwrap();
     writeln!(out, "#[cfg(feature = \"datalogging\")]").unwrap();
     writeln!(out, "pub const DATALOGGING_ENCODING: u32 = {dl_encoding};").unwrap();
 
@@ -40,6 +40,20 @@ fn read_u32(var: &str, default: u32) -> u32 {
         Err(_) => default,
         Ok(s) => s.parse::<u32>().unwrap_or_else(|_| panic!("{var} must be a positive integer, got {s:?}")),
     }
+}
+
+/// Formats a `u32` with underscore digit separators (e.g. `5000000` → `5_000_000`).
+fn sep(n: u32) -> String {
+    let s = n.to_string();
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    for (i, c) in chars.iter().enumerate() {
+        if i > 0 && (chars.len() - i).is_multiple_of(3) {
+            out.push('_');
+        }
+        out.push(*c);
+    }
+    out
 }
 
 fn read_datalogging_encoding(var: &str, default: u32) -> u32 {

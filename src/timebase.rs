@@ -8,37 +8,42 @@ pub struct Timebase {
 
 impl Timebase {
     /// Creates a new timebase initialised to zero.
+    #[must_use]
     pub const fn new() -> Self {
         Self { time_100ns: 0 }
     }
 
     /// Advances the clock by `timestep_100ns` ticks.
-    pub fn step(&mut self, timestep_100ns: Timediff) {
+    pub const fn step(&mut self, timestep_100ns: Timediff) {
         self.time_100ns = self.time_100ns.wrapping_add(timestep_100ns);
     }
 
     /// Returns the current time as an opaque snapshot for use with [`elapsed_since`] and [`has_expired`].
-    pub fn get_timestamp(&self) -> Timestamp {
+    #[must_use]
+    pub const fn get_timestamp(&self) -> Timestamp {
         self.time_100ns
     }
 
     /// Returns the number of 100 ns ticks elapsed since `timestamp`.
-    pub fn elapsed_since(&self, timestamp: Timestamp) -> Timediff {
+    #[must_use]
+    pub const fn elapsed_since(&self, timestamp: Timestamp) -> Timediff {
         self.time_100ns.wrapping_sub(timestamp)
     }
 
     /// Returns the number of whole microseconds elapsed since `timestamp`.
-    pub fn elapsed_us_since(&self, timestamp: Timestamp) -> Timediff {
+    #[must_use]
+    pub const fn elapsed_us_since(&self, timestamp: Timestamp) -> Timediff {
         self.elapsed_since(timestamp) / 10
     }
 
     /// Returns `true` if at least `timeout_100ns` ticks have elapsed since `timestamp`.
-    pub fn has_expired(&self, timestamp: Timestamp, timeout_100ns: Timediff) -> bool {
+    #[must_use]
+    pub const fn has_expired(&self, timestamp: Timestamp, timeout_100ns: Timediff) -> bool {
         self.elapsed_since(timestamp) >= timeout_100ns
     }
 
     /// Resets the internal counter to `val` (pass `0` for a full reset).
-    pub fn reset(&mut self, val: Timestamp) {
+    pub const fn reset(&mut self, val: Timestamp) {
         self.time_100ns = val;
     }
 }

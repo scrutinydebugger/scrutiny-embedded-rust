@@ -49,3 +49,4 @@ cargo clippy --all-features -- -D warnings
 - Port C++ callback pointers as function pointers (`fn(...) -> ...`), not closures.
 - All public types and functions must have a one-line doc comment.
 - Unit tests go inline at the bottom of each module file (`#[cfg(test)]`).
+- Edits needs to pass linting test

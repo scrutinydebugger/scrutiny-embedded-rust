@@ -161,9 +161,13 @@ impl<'buf> CommHandler<'buf> {
                 }
 
                 RxFsmState::WaitForData => {
-                    if u16::try_from(self.active_request.buffer.len()).unwrap_or(u16::MAX)
-                        < self.active_request.data_length
-                    {
+                    let Ok(buf_len) = u16::try_from(self.active_request.buffer.len()) else {
+                        self.rx_error = RxError::Overflow;
+                        self.rx_state = RxFsmState::Error;
+                        break;
+                    };
+
+                    if buf_len < self.active_request.data_length {
                         self.rx_error = RxError::Overflow;
                         self.rx_state = RxFsmState::Error;
                         break;
@@ -451,13 +455,13 @@ impl<'buf> CommHandler<'buf> {
     /// Size of the RX buffer in bytes.
     #[must_use]
     pub fn rx_buffer_size(&self) -> u16 {
-        u16::try_from(self.active_request.buffer.len()).unwrap_or(u16::MAX)
+        u16::try_from(self.active_request.buffer.len()).unwrap_or(0)
     }
 
     /// Size of the TX buffer in bytes.
     #[must_use]
     pub fn tx_buffer_size(&self) -> u16 {
-        u16::try_from(self.active_response.buffer.len()).unwrap_or(u16::MAX)
+        u16::try_from(self.active_response.buffer.len()).unwrap_or(0)
     }
 
     /// Resets all state including the session.

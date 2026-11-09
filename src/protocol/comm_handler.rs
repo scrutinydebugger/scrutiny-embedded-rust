@@ -3,11 +3,10 @@ use crate::tools::crc32;
 use crate::types::Timestamp;
 
 use super::definitions::{
-    CommControlSubfn, CommandId, CommState, RxError, RxFsmState, TxError,
+    CommControlSubfn, CommandId, CommState, Request, Response, RxError, RxFsmState, TxError,
     DISCOVER_MAGIC, HEARTBEAT_TIMEOUT_100NS, MAXIMUM_RX_BUFFER_SIZE, MAXIMUM_TX_BUFFER_SIZE,
     MINIMUM_RX_BUFFER_SIZE, MINIMUM_TX_BUFFER_SIZE, RX_TIMEOUT_100NS,
 };
-use super::definitions::Request;
 
 /// Manages the transport layer of the Scrutiny protocol.
 ///
@@ -20,8 +19,8 @@ use super::definitions::Request;
 /// Methods that need to read the current time take `tb: &Timebase` explicitly
 /// so the caller keeps sole ownership of the timebase.
 pub struct CommHandler<'buf> {
-    rx_buffer: &'buf mut [u8],
-    tx_buffer: &'buf mut [u8],
+    active_request: Request<'buf>,
+    active_response: Response<'buf>,
 
     // session
     session_counter: u32,
@@ -40,26 +39,15 @@ pub struct CommHandler<'buf> {
     rx_error: RxError,
     request_received: bool,
     last_rx_ts: Timestamp,
-    rx_cmd_id: u8,
-    rx_subfn_id: u8,
-    /// Payload length declared in the frame header.
-    rx_data_length: u16,
     /// CRC accumulated over header + payload bytes as they arrive.
     rx_crc: u32,
     /// Bytes of the current frame field assembled so far (overloaded by FSM state).
     per_state_counter: u16,
-    /// CRC extracted from the last four bytes of the frame.
-    rx_received_crc: u32,
 
     // TX
     tx_error: TxError,
     nbytes_to_send: u16,
     nbytes_sent: u16,
-    tx_cmd_id: u8,
-    tx_subfn_id: u8,
-    tx_response_code: u8,
-    tx_data_length: u16,
-    tx_crc: u32,
 }
 
 impl<'buf> CommHandler<'buf> {
@@ -81,8 +69,8 @@ impl<'buf> CommHandler<'buf> {
             && tx_size <= MAXIMUM_TX_BUFFER_SIZE;
 
         Self {
-            rx_buffer,
-            tx_buffer,
+            active_request: Request::new(rx_buffer),
+            active_response: Response::new(tx_buffer),
             session_counter: session_counter_seed,
             session_id: 0,
             session_active: false,
@@ -95,20 +83,11 @@ impl<'buf> CommHandler<'buf> {
             rx_error: RxError::None,
             request_received: false,
             last_rx_ts: 0,
-            rx_cmd_id: 0,
-            rx_subfn_id: 0,
-            rx_data_length: 0,
             rx_crc: 0,
             per_state_counter: 0,
-            rx_received_crc: 0,
             tx_error: TxError::None,
             nbytes_to_send: 0,
             nbytes_sent: 0,
-            tx_cmd_id: 0,
-            tx_subfn_id: 0,
-            tx_response_code: 0,
-            tx_data_length: 0,
-            tx_crc: 0,
         }
     }
 
@@ -144,7 +123,7 @@ impl<'buf> CommHandler<'buf> {
                         self.rx_error = RxError::InvalidCommand;
                         self.rx_state = RxFsmState::Error;
                     } else {
-                        self.rx_cmd_id = data[i];
+                        self.active_request.command_id = data[i];
                         self.rx_crc = crc32(&data[i..=i], 1, self.rx_crc);
                         self.rx_state = RxFsmState::WaitForSubfunction;
                         i += 1;
@@ -152,7 +131,7 @@ impl<'buf> CommHandler<'buf> {
                 }
 
                 RxFsmState::WaitForSubfunction => {
-                    self.rx_subfn_id = data[i];
+                    self.active_request.subfunction_id = data[i];
                     self.rx_crc = crc32(&data[i..=i], 1, self.rx_crc);
                     self.rx_state = RxFsmState::WaitForLength;
                     self.per_state_counter = 0;
@@ -162,26 +141,26 @@ impl<'buf> CommHandler<'buf> {
                 RxFsmState::WaitForLength => {
                     if self.per_state_counter == 0 {
                         if data.len() - i >= 2 {
-                            self.rx_data_length =
+                            self.active_request.data_length =
                                 (u16::from(data[i]) << 8) | u16::from(data[i + 1]);
                             self.rx_crc = crc32(&data[i..i + 2], 2, self.rx_crc);
                             self.per_state_counter = 2;
                             i += 2;
                         } else {
-                            self.rx_data_length = u16::from(data[i]) << 8;
+                            self.active_request.data_length = u16::from(data[i]) << 8;
                             self.rx_crc = crc32(&data[i..=i], 1, self.rx_crc);
                             self.per_state_counter = 1;
                             i += 1;
                         }
                     } else {
-                        self.rx_data_length |= u16::from(data[i]);
+                        self.active_request.data_length |= u16::from(data[i]);
                         self.rx_crc = crc32(&data[i..=i], 1, self.rx_crc);
                         self.per_state_counter = 2;
                         i += 1;
                     }
 
                     if self.per_state_counter == 2 {
-                        if self.rx_data_length == 0 {
+                        if self.active_request.data_length == 0 {
                             self.per_state_counter = 0;
                             self.rx_state = RxFsmState::WaitForCrc;
                         } else {
@@ -192,8 +171,8 @@ impl<'buf> CommHandler<'buf> {
                 }
 
                 RxFsmState::WaitForData => {
-                    if u16::try_from(self.rx_buffer.len()).unwrap_or(u16::MAX)
-                        < self.rx_data_length
+                    if u16::try_from(self.active_request.buffer.len()).unwrap_or(u16::MAX)
+                        < self.active_request.data_length
                     {
                         self.rx_error = RxError::Overflow;
                         self.rx_state = RxFsmState::Error;
@@ -201,16 +180,18 @@ impl<'buf> CommHandler<'buf> {
                     }
 
                     let available = data.len() - i;
-                    let missing = (self.rx_data_length - self.per_state_counter) as usize;
+                    let missing =
+                        (self.active_request.data_length - self.per_state_counter) as usize;
                     let to_read = available.min(missing);
 
                     let dst = self.per_state_counter as usize;
-                    self.rx_buffer[dst..dst + to_read].copy_from_slice(&data[i..i + to_read]);
+                    self.active_request.buffer[dst..dst + to_read]
+                        .copy_from_slice(&data[i..i + to_read]);
                     self.rx_crc = crc32(&data[i..i + to_read], to_read, self.rx_crc);
                     self.per_state_counter += to_read as u16;
                     i += to_read;
 
-                    if self.per_state_counter >= self.rx_data_length {
+                    if self.per_state_counter >= self.active_request.data_length {
                         self.per_state_counter = 0;
                         self.rx_state = RxFsmState::WaitForCrc;
                     }
@@ -218,13 +199,14 @@ impl<'buf> CommHandler<'buf> {
 
                 RxFsmState::WaitForCrc => {
                     // CRC arrives MSB-first; shift each byte in from the right
-                    self.rx_received_crc = (self.rx_received_crc << 8) | u32::from(data[i]);
+                    self.active_request.crc =
+                        (self.active_request.crc << 8) | u32::from(data[i]);
                     self.per_state_counter += 1;
                     i += 1;
 
                     if self.per_state_counter >= 4 {
                         self.state = CommState::Idle;
-                        if self.rx_crc == self.rx_received_crc {
+                        if self.rx_crc == self.active_request.crc {
                             self.process_active_request();
                         } else {
                             self.reset_rx(tb.get_timestamp());
@@ -244,15 +226,11 @@ impl<'buf> CommHandler<'buf> {
     }
 
     /// Returns the pending request, or `None` if no request has been received yet.
-    pub fn get_request(&self) -> Option<Request<'_>> {
+    pub fn get_request(&self) -> Option<&Request<'_>> {
         if !self.request_received {
             return None;
         }
-        Some(Request {
-            command_id: self.rx_cmd_id,
-            subfunction_id: self.rx_subfn_id,
-            data: &self.rx_buffer[..self.rx_data_length as usize],
-        })
+        Some(&self.active_request)
     }
 
     /// Clears the pending request and readies the RX path for the next frame.
@@ -260,26 +238,20 @@ impl<'buf> CommHandler<'buf> {
         self.reset_rx(tb.get_timestamp());
     }
 
-    /// Returns a mutable slice of the TX buffer for the caller to fill with
-    /// response payload bytes.  Call [`send_response`](Self::send_response) with
-    /// the matching header fields once the slice has been populated.
-    pub fn prepare_response(&mut self) -> &mut [u8] {
-        self.tx_buffer
+    /// Returns a mutable reference to the response object for the caller to fill.
+    /// Set [`Response::command_id`], [`Response::subfunction_id`],
+    /// [`Response::response_code`], [`Response::data_length`], and write payload
+    /// bytes via [`Response::payload`], then call [`send_response`](Self::send_response).
+    pub fn prepare_response(&mut self) -> &mut Response<'buf> {
+        &mut self.active_response
     }
 
-    /// Queues a response for transmission.
+    /// Queues the response prepared via [`prepare_response`](Self::prepare_response)
+    /// for transmission.
     ///
-    /// The payload must already be written into the buffer returned by
-    /// [`prepare_response`](Self::prepare_response).
     /// Returns `false` (and records a `tx_error`) if the handler is disabled,
-    /// busy, or `data_len` exceeds the TX buffer size.
-    pub fn send_response(
-        &mut self,
-        command_id: u8,
-        subfunction_id: u8,
-        response_code: u8,
-        data_len: u16,
-    ) -> bool {
+    /// busy, or `data_length` exceeds the TX buffer size.
+    pub fn send_response(&mut self) -> bool {
         self.tx_error = TxError::None;
 
         if !self.enabled {
@@ -290,23 +262,21 @@ impl<'buf> CommHandler<'buf> {
             self.tx_error = TxError::Busy;
             return false;
         }
-        if usize::from(data_len) > self.tx_buffer.len() {
+        let data_len = self.active_response.data_length;
+        if usize::from(data_len) > self.active_response.buffer.len() {
             self.reset_tx();
             self.tx_error = TxError::Overflow;
             return false;
         }
 
-        self.tx_cmd_id = command_id | 0x80;
-        self.tx_subfn_id = subfunction_id;
-        self.tx_response_code = response_code;
-        self.tx_data_length = data_len;
-        self.tx_crc = Self::compute_response_crc(
-            self.tx_cmd_id,
-            self.tx_subfn_id,
-            self.tx_response_code,
-            self.tx_data_length,
-            &self.tx_buffer[..data_len as usize],
+        let crc = Self::compute_response_crc(
+            self.active_response.command_id | 0x80,
+            self.active_response.subfunction_id,
+            self.active_response.response_code,
+            data_len,
+            &self.active_response.buffer[..data_len as usize],
         );
+        self.active_response.crc = crc;
 
         // cmd(1) + subfn(1) + code(1) + len(2) + data(data_len) + crc(4)
         self.nbytes_to_send = 1 + 1 + 1 + 2 + data_len + 4;
@@ -327,14 +297,14 @@ impl<'buf> CommHandler<'buf> {
         let to_copy = out.len().min(remaining as usize) as u16;
         let mut i = 0u16;
 
-        // Header: cmd, subfn, code, len_hi, len_lo
+        // Header: cmd|0x80, subfn, code, len_hi, len_lo
         while self.nbytes_sent < 5 && i < to_copy {
             out[i as usize] = match self.nbytes_sent {
-                0 => self.tx_cmd_id,
-                1 => self.tx_subfn_id,
-                2 => self.tx_response_code,
-                3 => (self.tx_data_length >> 8) as u8,
-                4 => (self.tx_data_length & 0xFF) as u8,
+                0 => self.active_response.command_id | 0x80,
+                1 => self.active_response.subfunction_id,
+                2 => self.active_response.response_code,
+                3 => (self.active_response.data_length >> 8) as u8,
+                4 => (self.active_response.data_length & 0xFF) as u8,
                 _ => unreachable!(),
             };
             i += 1;
@@ -344,22 +314,25 @@ impl<'buf> CommHandler<'buf> {
         // Payload
         if self.nbytes_sent >= 5 && i < to_copy {
             let data_sent = self.nbytes_sent - 5;
-            if data_sent < self.tx_data_length {
-                let remaining_data = self.tx_data_length - data_sent;
+            let data_length = self.active_response.data_length;
+            if data_sent < data_length {
+                let remaining_data = data_length - data_sent;
                 let can_copy = (to_copy - i).min(remaining_data);
                 let src = data_sent as usize;
-                out[i as usize..(i + can_copy) as usize]
-                    .copy_from_slice(&self.tx_buffer[src..src + can_copy as usize]);
+                let dst = i as usize;
+                let payload = &self.active_response.buffer[src..src + can_copy as usize];
+                out[dst..dst + can_copy as usize].copy_from_slice(payload);
                 i += can_copy;
                 self.nbytes_sent += can_copy;
             }
         }
 
         // CRC (4 bytes, big-endian)
-        let crc_start = self.tx_data_length + 5;
+        let crc_start = self.active_response.data_length + 5;
         while i < to_copy && self.nbytes_sent < self.nbytes_to_send {
             let crc_byte = self.nbytes_sent - crc_start;
-            out[i as usize] = ((self.tx_crc >> (24 - crc_byte * 8)) & 0xFF) as u8;
+            out[i as usize] =
+                ((self.active_response.crc >> (24 - crc_byte * 8)) & 0xFF) as u8;
             i += 1;
             self.nbytes_sent += 1;
         }
@@ -475,12 +448,12 @@ impl<'buf> CommHandler<'buf> {
 
     /// Size of the RX buffer in bytes.
     pub fn rx_buffer_size(&self) -> u16 {
-        self.rx_buffer.len() as u16
+        self.active_request.buffer.len() as u16
     }
 
     /// Size of the TX buffer in bytes.
     pub fn tx_buffer_size(&self) -> u16 {
-        self.tx_buffer.len() as u16
+        self.active_response.buffer.len() as u16
     }
 
     /// Resets all state including the session.
@@ -498,10 +471,7 @@ impl<'buf> CommHandler<'buf> {
     }
 
     fn reset_rx(&mut self, last_rx_ts: Timestamp) {
-        self.rx_cmd_id = 0;
-        self.rx_subfn_id = 0;
-        self.rx_data_length = 0;
-        self.rx_received_crc = 0;
+        self.active_request.reset();
         self.rx_state = RxFsmState::WaitForCommand;
         self.request_received = false;
         self.rx_error = RxError::None;
@@ -515,7 +485,7 @@ impl<'buf> CommHandler<'buf> {
     }
 
     fn reset_tx(&mut self) {
-        self.tx_data_length = 0;
+        self.active_response.reset();
         self.nbytes_to_send = 0;
         self.nbytes_sent = 0;
         self.tx_error = TxError::None;
@@ -541,21 +511,21 @@ impl<'buf> CommHandler<'buf> {
     }
 
     fn is_discover_request(&self) -> bool {
-        if self.rx_cmd_id != CommandId::CommControl as u8 {
+        if self.active_request.command_id != CommandId::CommControl as u8 {
             return false;
         }
-        if self.rx_subfn_id != CommControlSubfn::Discover as u8 {
+        if self.active_request.subfunction_id != CommControlSubfn::Discover as u8 {
             return false;
         }
-        if (self.rx_data_length as usize) < DISCOVER_MAGIC.len() {
+        if (self.active_request.data_length as usize) < DISCOVER_MAGIC.len() {
             return false;
         }
-        self.rx_buffer[..DISCOVER_MAGIC.len()] == DISCOVER_MAGIC
+        self.active_request.buffer[..DISCOVER_MAGIC.len()] == DISCOVER_MAGIC
     }
 
     fn is_connect_request(&self) -> bool {
-        self.rx_cmd_id == CommandId::CommControl as u8
-            && self.rx_subfn_id == CommControlSubfn::Connect as u8
+        self.active_request.command_id == CommandId::CommControl as u8
+            && self.active_request.subfunction_id == CommControlSubfn::Connect as u8
     }
 
     fn compute_response_crc(

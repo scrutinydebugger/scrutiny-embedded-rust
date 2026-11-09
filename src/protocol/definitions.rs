@@ -13,12 +13,61 @@ pub const RX_TIMEOUT_100NS: u32 = crate::build_config::COMM_RX_TIMEOUT_US * 10;
 pub const HEARTBEAT_TIMEOUT_100NS: u32 = crate::build_config::COMM_HEARTBEAT_TIMEOUT_US * 10;
 
 /// A fully-received and CRC-validated request from the server.
-/// `data` is a slice into the `CommHandler`'s RX buffer and is valid until
-/// [`CommHandler::wait_next_request`] is called.
+/// Owns the RX buffer; valid until [`CommHandler::wait_next_request`] is called.
 pub struct Request<'buf> {
     pub command_id: u8,
     pub subfunction_id: u8,
-    pub data: &'buf [u8],
+    pub(super) data_length: u16,
+    pub(super) crc: u32,
+    pub(super) buffer: &'buf mut [u8],
+}
+
+impl<'buf> Request<'buf> {
+    pub(super) fn new(buffer: &'buf mut [u8]) -> Self {
+        Self { command_id: 0, subfunction_id: 0, data_length: 0, crc: 0, buffer }
+    }
+
+    /// Returns the received payload bytes.
+    pub fn data(&self) -> &[u8] {
+        &self.buffer[..self.data_length as usize]
+    }
+
+    pub(super) fn reset(&mut self) {
+        self.command_id = 0;
+        self.subfunction_id = 0;
+        self.data_length = 0;
+        self.crc = 0;
+    }
+}
+
+/// A response to be sent back to the server.
+/// Owns the TX buffer; fill fields and call [`CommHandler::send_response`].
+pub struct Response<'buf> {
+    pub command_id: u8,
+    pub subfunction_id: u8,
+    pub response_code: u8,
+    pub data_length: u16,
+    pub(super) crc: u32,
+    pub(super) buffer: &'buf mut [u8],
+}
+
+impl<'buf> Response<'buf> {
+    pub(super) fn new(buffer: &'buf mut [u8]) -> Self {
+        Self { command_id: 0, subfunction_id: 0, response_code: 0, data_length: 0, crc: 0, buffer }
+    }
+
+    /// Returns the full TX buffer for writing response payload bytes.
+    pub fn payload(&mut self) -> &mut [u8] {
+        self.buffer
+    }
+
+    pub(super) fn reset(&mut self) {
+        self.command_id = 0;
+        self.subfunction_id = 0;
+        self.response_code = 0;
+        self.data_length = 0;
+        self.crc = 0;
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

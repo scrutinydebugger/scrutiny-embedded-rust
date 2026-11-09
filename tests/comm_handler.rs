@@ -57,12 +57,17 @@ fn test_consecutive_send() {
     assert!(!comm.transmitting());
 
     // First send
-    comm.prepare_response()[..3].copy_from_slice(&payload);
-    assert!(comm.send_response(0x01, 0x02, 0x03, 3));
+    let resp = comm.prepare_response();
+    resp.command_id = 0x01;
+    resp.subfunction_id = 0x02;
+    resp.response_code = 0x03;
+    resp.data_length = 3;
+    resp.payload()[..3].copy_from_slice(&payload);
+    assert!(comm.send_response());
     assert!(comm.transmitting());
 
     // Second send while busy must fail
-    assert!(!comm.send_response(0x01, 0x02, 0x03, 3));
+    assert!(!comm.send_response());
     assert_eq!(comm.get_tx_error(), TxError::Busy);
 
     let n = comm.data_to_send() as usize;
@@ -75,8 +80,13 @@ fn test_consecutive_send() {
     assert!(!comm.transmitting());
 
     // Second send after pop must succeed
-    comm.prepare_response()[..3].copy_from_slice(&payload);
-    assert!(comm.send_response(0x01, 0x02, 0x03, 3));
+    let resp = comm.prepare_response();
+    resp.command_id = 0x01;
+    resp.subfunction_id = 0x02;
+    resp.response_code = 0x03;
+    resp.data_length = 3;
+    resp.payload()[..3].copy_from_slice(&payload);
+    assert!(comm.send_response());
     assert!(comm.transmitting());
 
     let n = comm.data_to_send() as usize;
@@ -180,7 +190,7 @@ fn test_rx_framing_valid() {
     let req = comm.get_request().expect("request must be present");
     assert_eq!(req.command_id, 0x01);
     assert_eq!(req.subfunction_id, 0x02);
-    assert_eq!(req.data, &payload);
+    assert_eq!(req.data(), &payload);
 }
 
 #[test]
@@ -263,7 +273,7 @@ fn test_rx_chunked_delivery() {
     }
 
     assert!(comm.request_received());
-    assert_eq!(comm.get_request().unwrap().data, &payload);
+    assert_eq!(comm.get_request().unwrap().data(), &payload);
 }
 
 #[test]
@@ -323,8 +333,13 @@ fn test_pop_data_partial_reads() {
     let payload = [0x11u8, 0x22, 0x33];
     let expected = make_expected_response(0x01, 0x02, 0x00, &payload);
 
-    comm.prepare_response()[..3].copy_from_slice(&payload);
-    assert!(comm.send_response(0x01, 0x02, 0x00, 3));
+    let resp = comm.prepare_response();
+    resp.command_id = 0x01;
+    resp.subfunction_id = 0x02;
+    resp.response_code = 0x00;
+    resp.data_length = 3;
+    resp.payload()[..3].copy_from_slice(&payload);
+    assert!(comm.send_response());
 
     let mut collected = Vec::new();
     let mut tmp = [0u8; 3];
@@ -348,7 +363,12 @@ fn test_disabled_handler_rejects_rx_and_tx() {
     comm.receive_data(&frame, &tb);
     assert_eq!(comm.get_rx_error(), RxError::Disabled);
 
-    comm.prepare_response()[0] = 0xFF;
-    assert!(!comm.send_response(0x01, 0x01, 0x00, 1));
+    let resp = comm.prepare_response();
+    resp.command_id = 0x01;
+    resp.subfunction_id = 0x01;
+    resp.response_code = 0x00;
+    resp.data_length = 1;
+    resp.payload()[0] = 0xFF;
+    assert!(!comm.send_response());
     assert_eq!(comm.get_tx_error(), TxError::Disabled);
 }

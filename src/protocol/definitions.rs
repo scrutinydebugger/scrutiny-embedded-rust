@@ -7,10 +7,10 @@ pub const MINIMUM_TX_BUFFER_SIZE: u16 = 32;
 pub const MAXIMUM_RX_BUFFER_SIZE: u16 = 0xFFFF - 16;
 pub const MAXIMUM_TX_BUFFER_SIZE: u16 = 0xFFFF - 16;
 
-/// Inter-byte RX gap that resets the FSM (50 ms in 100 ns units).
-pub const RX_TIMEOUT_100NS: u32 = 50_000 * 10;
-/// Session heartbeat deadline (5 s in 100 ns units).
-pub const HEARTBEAT_TIMEOUT_100NS: u32 = 5_000_000 * 10;
+/// Inter-byte RX gap that resets the FSM, in 100 ns units.
+pub const RX_TIMEOUT_100NS: u32 = crate::build_config::COMM_RX_TIMEOUT_US * 10;
+/// Session heartbeat deadline, in 100 ns units.
+pub const HEARTBEAT_TIMEOUT_100NS: u32 = crate::build_config::COMM_HEARTBEAT_TIMEOUT_US * 10;
 
 /// A fully-received and CRC-validated request from the server.
 /// `data` is a slice into the `CommHandler`'s RX buffer and is valid until

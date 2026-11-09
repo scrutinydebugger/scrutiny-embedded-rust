@@ -5,8 +5,6 @@ use scrutiny_embedded_rust::protocol::{
 use scrutiny_embedded_rust::timebase::Timebase;
 use scrutiny_embedded_rust::tools::crc32;
 
-// ── Frame-building helpers ────────────────────────────────────────────────────
-
 /// Builds a request frame: cmd(1) + subfn(1) + len_hi(1) + len_lo(1) + data + crc32(4).
 fn make_request(cmd: u8, subfn: u8, payload: &[u8]) -> Vec<u8> {
     let len = payload.len() as u16;
@@ -43,16 +41,11 @@ fn make_expected_response(cmd: u8, subfn: u8, code: u8, payload: &[u8]) -> Vec<u
     frame
 }
 
-// ── Fixture ───────────────────────────────────────────────────────────────────
-
 fn make_comm_buffers() -> ([u8; 128], [u8; 128]) {
     ([0u8; 128], [0u8; 128])
 }
 
-// ── Tests ported from the C++ suite ──────────────────────────────────────────
-
 #[test]
-// Port of TestConsecutiveSend
 fn test_consecutive_send() {
     let (mut rx, mut tx) = make_comm_buffers();
     let tb = Timebase::new();
@@ -171,8 +164,6 @@ fn test_connect_disconnect() {
     comm.receive_data(&frame[frame.len() - 1..], &tb);
     assert!(!comm.request_received());
 }
-
-// ── Additional Rust-side tests ────────────────────────────────────────────────
 
 #[test]
 fn test_rx_framing_valid() {

@@ -38,9 +38,7 @@ fn main() {
 fn read_u32(var: &str, default: u32) -> u32 {
     match env::var(var) {
         Err(_) => default,
-        Ok(s) => s
-            .parse::<u32>()
-            .unwrap_or_else(|_| panic!("{var} must be a positive integer, got {s:?}")),
+        Ok(s) => s.parse::<u32>().unwrap_or_else(|_| panic!("{var} must be a positive integer, got {s:?}")),
     }
 }
 

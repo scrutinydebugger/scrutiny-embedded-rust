@@ -2,5 +2,6 @@
 #![deny(warnings)]
 #![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 
+pub mod timebase;
 pub mod tools;
 pub mod types;

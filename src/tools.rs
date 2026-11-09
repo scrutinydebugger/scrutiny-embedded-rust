@@ -1,10 +1,7 @@
-use crate::types::AnyType;
-use crate::types::FloatBiggest;
-use crate::types::IntBiggest;
-use crate::types::UintBiggest;
-use crate::types::VariableType;
-use crate::types::VariableTypeSize;
-use crate::types::VariableTypeType;
+use crate::types::{
+    AnyType, FloatBiggest, IntBiggest, UintBiggest, VariableType, VariableTypeSize,
+    VariableTypeType,
+};
 
 const CRC32_TABLE: [u32; 16] = [
     0x00000000, 0x1DB71064, 0x3B6E20C8, 0x26D930AC, 0x76DC4190, 0x6B6B51F4, 0x4DB26158, 0x5005713C,

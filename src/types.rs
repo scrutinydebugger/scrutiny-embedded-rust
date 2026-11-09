@@ -94,3 +94,9 @@ pub struct RuntimePublishedValue {
     pub id: u16,
     pub var_type: VariableType,
 }
+
+/// A point-in-time snapshot used as a reference for elapsed-time calculations. Units: 100 ns ticks.
+pub type Timestamp = u32;
+
+/// A duration or time delta. Units: 100 ns ticks.
+pub type Timediff = u32;

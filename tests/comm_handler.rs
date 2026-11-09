@@ -1,6 +1,6 @@
 use scrutiny_embedded_rust::protocol::{
-    CommControlSubfn, CommandId, CommHandler, RxError, TxError,
-    DISCOVER_MAGIC, HEARTBEAT_TIMEOUT_100NS, RX_TIMEOUT_100NS,
+    CommControlSubfn, CommHandler, CommandId, RxError, TxError, DISCOVER_MAGIC, HEARTBEAT_TIMEOUT_100NS,
+    RX_TIMEOUT_100NS,
 };
 use scrutiny_embedded_rust::timebase::Timebase;
 use scrutiny_embedded_rust::tools::crc32;
@@ -143,7 +143,7 @@ fn test_connect_disconnect() {
     assert!(comm.is_connected());
     let first_id = comm.get_session_id();
 
-    comm.disconnect();
+    comm.disconnect(&tb);
     assert!(!comm.is_connected());
     comm.connect(&tb);
     assert_ne!(comm.get_session_id(), first_id);
@@ -156,7 +156,7 @@ fn test_connect_disconnect() {
     assert!(comm.request_received());
 
     // disconnect clears the pending request
-    comm.disconnect();
+    comm.disconnect(&tb);
     assert!(!comm.request_received());
 
     // Partial frame followed by disconnect then reconnect: the partial bytes
@@ -167,10 +167,10 @@ fn test_connect_disconnect() {
     comm.process(&tb);
     assert!(!comm.request_received());
 
-    comm.disconnect();
+    comm.disconnect(&tb);
     comm.connect(&tb);
     tb.step(1); // small clock advance so the new session has a fresh timestamp
-    // Supply only the last byte of the old frame — must not complete a request
+                // Supply only the last byte of the old frame — must not complete a request
     comm.receive_data(&frame[frame.len() - 1..], &tb);
     assert!(!comm.request_received());
 }
@@ -302,11 +302,7 @@ fn test_connect_request_without_session() {
     let tb = Timebase::new();
     let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
 
-    let frame = make_request(
-        CommandId::CommControl as u8,
-        CommControlSubfn::Connect as u8,
-        &[],
-    );
+    let frame = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &[]);
     comm.receive_data(&frame, &tb);
     assert!(comm.request_received());
 }

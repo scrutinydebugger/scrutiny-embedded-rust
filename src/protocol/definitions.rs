@@ -24,7 +24,13 @@ pub struct Request<'buf> {
 
 impl<'buf> Request<'buf> {
     pub(super) fn new(buffer: &'buf mut [u8]) -> Self {
-        Self { command_id: 0, subfunction_id: 0, data_length: 0, crc: 0, buffer }
+        Self {
+            command_id: 0,
+            subfunction_id: 0,
+            data_length: 0,
+            crc: 0,
+            buffer,
+        }
     }
 
     /// Returns the received payload bytes.
@@ -53,7 +59,14 @@ pub struct Response<'buf> {
 
 impl<'buf> Response<'buf> {
     pub(super) fn new(buffer: &'buf mut [u8]) -> Self {
-        Self { command_id: 0, subfunction_id: 0, response_code: 0, data_length: 0, crc: 0, buffer }
+        Self {
+            command_id: 0,
+            subfunction_id: 0,
+            response_code: 0,
+            data_length: 0,
+            crc: 0,
+            buffer,
+        }
     }
 
     /// Returns the full TX buffer for writing response payload bytes.

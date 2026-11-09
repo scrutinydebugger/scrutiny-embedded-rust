@@ -3,9 +3,9 @@ use crate::tools::crc32;
 use crate::types::Timestamp;
 
 use super::definitions::{
-    CommControlSubfn, CommandId, CommState, Request, Response, RxError, RxFsmState, TxError,
-    DISCOVER_MAGIC, HEARTBEAT_TIMEOUT_100NS, MAXIMUM_RX_BUFFER_SIZE, MAXIMUM_TX_BUFFER_SIZE,
-    MINIMUM_RX_BUFFER_SIZE, MINIMUM_TX_BUFFER_SIZE, RX_TIMEOUT_100NS,
+    CommControlSubfn, CommState, CommandId, Request, Response, RxError, RxFsmState, TxError, DISCOVER_MAGIC,
+    HEARTBEAT_TIMEOUT_100NS, MAXIMUM_RX_BUFFER_SIZE, MAXIMUM_TX_BUFFER_SIZE, MINIMUM_RX_BUFFER_SIZE,
+    MINIMUM_TX_BUFFER_SIZE, RX_TIMEOUT_100NS,
 };
 
 /// Manages the transport layer of the Scrutiny protocol.
@@ -27,7 +27,7 @@ pub struct CommHandler<'buf> {
     session_id: u32,
     session_active: bool,
     enabled: bool,
-    heartbeat_ts: Timestamp,
+    heartbeat_timestamp: Timestamp,
     last_challenge: u16,
     first_heartbeat_received: bool,
 
@@ -38,7 +38,7 @@ pub struct CommHandler<'buf> {
     rx_state: RxFsmState,
     rx_error: RxError,
     request_received: bool,
-    last_rx_ts: Timestamp,
+    last_rx_timestamp: Timestamp,
     /// CRC accumulated over header + payload bytes as they arrive.
     rx_crc: u32,
     /// Bytes of the current frame field assembled so far (overloaded by FSM state).
@@ -56,11 +56,7 @@ impl<'buf> CommHandler<'buf> {
     /// `session_counter_seed` offsets session IDs to avoid collisions when
     /// multiple Scrutiny devices share one channel.
     /// Self-disables if either buffer is outside the allowed size range.
-    pub fn new(
-        rx_buffer: &'buf mut [u8],
-        tx_buffer: &'buf mut [u8],
-        session_counter_seed: u32,
-    ) -> Self {
+    pub fn new(rx_buffer: &'buf mut [u8], tx_buffer: &'buf mut [u8], session_counter_seed: u32) -> Self {
         let rx_size = rx_buffer.len() as u16;
         let tx_size = tx_buffer.len() as u16;
         let enabled = rx_size >= MINIMUM_RX_BUFFER_SIZE
@@ -75,14 +71,14 @@ impl<'buf> CommHandler<'buf> {
             session_id: 0,
             session_active: false,
             enabled,
-            heartbeat_ts: 0,
+            heartbeat_timestamp: 0,
             last_challenge: 0,
             first_heartbeat_received: false,
             state: CommState::Idle,
             rx_state: RxFsmState::WaitForCommand,
             rx_error: RxError::None,
             request_received: false,
-            last_rx_ts: 0,
+            last_rx_timestamp: 0,
             rx_crc: 0,
             per_state_counter: 0,
             tx_error: TxError::None,
@@ -103,11 +99,11 @@ impl<'buf> CommHandler<'buf> {
         }
 
         if !data.is_empty() {
-            if tb.has_expired(self.last_rx_ts, RX_TIMEOUT_100NS) {
+            if tb.has_expired(self.last_rx_timestamp, RX_TIMEOUT_100NS) {
                 self.reset_rx(tb.get_timestamp());
                 self.state = CommState::Idle;
             }
-            self.last_rx_ts = tb.get_timestamp();
+            self.last_rx_timestamp = tb.get_timestamp();
 
             if self.state == CommState::Idle {
                 self.state = CommState::Receiving;
@@ -141,8 +137,7 @@ impl<'buf> CommHandler<'buf> {
                 RxFsmState::WaitForLength => {
                     if self.per_state_counter == 0 {
                         if data.len() - i >= 2 {
-                            self.active_request.data_length =
-                                (u16::from(data[i]) << 8) | u16::from(data[i + 1]);
+                            self.active_request.data_length = (u16::from(data[i]) << 8) | u16::from(data[i + 1]);
                             self.rx_crc = crc32(&data[i..i + 2], 2, self.rx_crc);
                             self.per_state_counter = 2;
                             i += 2;
@@ -180,13 +175,11 @@ impl<'buf> CommHandler<'buf> {
                     }
 
                     let available = data.len() - i;
-                    let missing =
-                        (self.active_request.data_length - self.per_state_counter) as usize;
+                    let missing = (self.active_request.data_length - self.per_state_counter) as usize;
                     let to_read = available.min(missing);
 
                     let dst = self.per_state_counter as usize;
-                    self.active_request.buffer[dst..dst + to_read]
-                        .copy_from_slice(&data[i..i + to_read]);
+                    self.active_request.buffer[dst..dst + to_read].copy_from_slice(&data[i..i + to_read]);
                     self.rx_crc = crc32(&data[i..i + to_read], to_read, self.rx_crc);
                     self.per_state_counter += to_read as u16;
                     i += to_read;
@@ -199,8 +192,7 @@ impl<'buf> CommHandler<'buf> {
 
                 RxFsmState::WaitForCrc => {
                     // CRC arrives MSB-first; shift each byte in from the right
-                    self.active_request.crc =
-                        (self.active_request.crc << 8) | u32::from(data[i]);
+                    self.active_request.crc = (self.active_request.crc << 8) | u32::from(data[i]);
                     self.per_state_counter += 1;
                     i += 1;
 
@@ -243,6 +235,7 @@ impl<'buf> CommHandler<'buf> {
     /// [`Response::response_code`], [`Response::data_length`], and write payload
     /// bytes via [`Response::payload`], then call [`send_response`](Self::send_response).
     pub fn prepare_response(&mut self) -> &mut Response<'buf> {
+        self.active_response.reset();
         &mut self.active_response
     }
 
@@ -331,8 +324,7 @@ impl<'buf> CommHandler<'buf> {
         let crc_start = self.active_response.data_length + 5;
         while i < to_copy && self.nbytes_sent < self.nbytes_to_send {
             let crc_byte = self.nbytes_sent - crc_start;
-            out[i as usize] =
-                ((self.active_response.crc >> (24 - crc_byte * 8)) & 0xFF) as u8;
+            out[i as usize] = ((self.active_response.crc >> (24 - crc_byte * 8)) & 0xFF) as u8;
             i += 1;
             self.nbytes_sent += 1;
         }
@@ -363,17 +355,17 @@ impl<'buf> CommHandler<'buf> {
         self.session_counter = self.session_counter.wrapping_add(1);
         self.session_active = true;
         self.first_heartbeat_received = false;
-        self.heartbeat_ts = tb.get_timestamp();
+        self.heartbeat_timestamp = tb.get_timestamp();
         self.reset_rx(tb.get_timestamp());
         true
     }
 
     /// Closes the active session.
-    pub fn disconnect(&mut self) {
+    pub fn disconnect(&mut self, tb: &Timebase) {
         self.session_id = 0;
         self.session_active = false;
         self.first_heartbeat_received = false;
-        self.reset_rx(0);
+        self.reset_rx(tb.get_timestamp());
         self.reset_tx();
     }
 
@@ -395,7 +387,7 @@ impl<'buf> CommHandler<'buf> {
         }
         if challenge != self.last_challenge || !self.first_heartbeat_received {
             self.first_heartbeat_received = true;
-            self.heartbeat_ts = tb.get_timestamp();
+            self.heartbeat_timestamp = tb.get_timestamp();
             self.last_challenge = challenge;
             return true;
         }
@@ -405,7 +397,7 @@ impl<'buf> CommHandler<'buf> {
     /// Must be called regularly.  Drops the session if the heartbeat watchdog
     /// expires.
     pub fn process(&mut self, tb: &Timebase) {
-        if self.session_active && tb.has_expired(self.heartbeat_ts, HEARTBEAT_TIMEOUT_100NS) {
+        if self.session_active && tb.has_expired(self.heartbeat_timestamp, HEARTBEAT_TIMEOUT_100NS) {
             self.reset(tb);
         }
     }
@@ -464,18 +456,18 @@ impl<'buf> CommHandler<'buf> {
         self.session_id = 0;
         self.session_active = false;
         if self.enabled {
-            self.heartbeat_ts = tb.get_timestamp();
+            self.heartbeat_timestamp = tb.get_timestamp();
             self.reset_rx(tb.get_timestamp());
             self.reset_tx();
         }
     }
 
-    fn reset_rx(&mut self, last_rx_ts: Timestamp) {
+    fn reset_rx(&mut self, last_rx_timestamp: Timestamp) {
         self.active_request.reset();
         self.rx_state = RxFsmState::WaitForCommand;
         self.request_received = false;
         self.rx_error = RxError::None;
-        self.last_rx_ts = last_rx_ts;
+        self.last_rx_timestamp = last_rx_timestamp;
         self.rx_crc = 0;
         self.per_state_counter = 0;
 
@@ -506,7 +498,7 @@ impl<'buf> CommHandler<'buf> {
             self.rx_state = RxFsmState::WaitForProcess;
             self.request_received = true;
         } else {
-            self.reset_rx(self.last_rx_ts);
+            self.reset_rx(self.last_rx_timestamp);
         }
     }
 
@@ -528,20 +520,8 @@ impl<'buf> CommHandler<'buf> {
             && self.active_request.subfunction_id == CommControlSubfn::Connect as u8
     }
 
-    fn compute_response_crc(
-        cmd: u8,
-        subfn: u8,
-        code: u8,
-        data_len: u16,
-        payload: &[u8],
-    ) -> u32 {
-        let header: [u8; 5] = [
-            cmd,
-            subfn,
-            code,
-            (data_len >> 8) as u8,
-            (data_len & 0xFF) as u8,
-        ];
+    fn compute_response_crc(cmd: u8, subfn: u8, code: u8, data_len: u16, payload: &[u8]) -> u32 {
+        let header: [u8; 5] = [cmd, subfn, code, (data_len >> 8) as u8, (data_len & 0xFF) as u8];
         let crc = crc32(&header, 5, 0);
         crc32(payload, payload.len(), crc)
     }

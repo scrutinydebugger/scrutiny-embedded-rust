@@ -1,5 +1,10 @@
+use crate::types::AnyType;
+use crate::types::FloatBiggest;
+use crate::types::IntBiggest;
+use crate::types::UintBiggest;
 use crate::types::VariableType;
 use crate::types::VariableTypeSize;
+use crate::types::VariableTypeType;
 
 const CRC32_TABLE: [u32; 16] = [
     0x00000000, 0x1DB71064, 0x3B6E20C8, 0x26D930AC, 0x76DC4190, 0x6B6B51F4, 0x4DB26158, 0x5005713C,
@@ -49,7 +54,86 @@ pub enum Status {
     Error = 1,
 }
 
+#[inline]
+pub fn get_var_type_type(vt: VariableType) -> VariableTypeType {
+    unsafe { core::mem::transmute((vt as u8) & 0xF0) } //
+}
 
+#[inline]
+pub fn make_type(tt: VariableTypeType, ts: VariableTypeSize) -> VariableType {
+    if tt == VariableTypeType::VTTundef || ts == VariableTypeSize::VTSundef {
+        return VariableType::Unknown;
+    }
+
+    return unsafe { core::mem::transmute((tt as u8) | (ts as u8)) };
+}
+
+cfg_select! {
+    feature = "support_64bits" => {
+        #[inline]
+        pub fn read_biggest_uint(v: &AnyType) -> UintBiggest {
+            unsafe { v.uint64 }
+        }
+
+        #[inline]
+        pub fn read_biggest_sint(v: &AnyType) -> IntBiggest{
+            unsafe { v.sint64 }
+        }
+
+        #[inline]
+        pub fn read_biggest_float(v: &AnyType) -> FloatBiggest{
+            unsafe { v.float64 }
+        }
+
+        #[inline]
+        pub fn set_biggest_sint(v: &mut AnyType, val: IntBiggest){
+            v.sint64 = val;
+        }
+
+        #[inline]
+        pub fn set_biggest_uint(v: &mut AnyType, val: UintBiggest){
+            v.uint64 = val;
+        }
+
+        #[inline]
+        pub fn set_biggest_float(v: &mut AnyType, val: FloatBiggest){
+            v.float64 = val;
+        }
+
+    },
+    _ => {
+
+        #[inline]
+        pub fn read_biggest_uint(v: &AnyType) -> UIntBiggest {
+            unsafe { v.uint32 }
+        }
+
+        #[inline]
+        pub fn read_biggest_sint(v: &AnyType) -> IntBiggest{
+            unsafe { v.sint32 }
+        }
+
+        #[inline]
+        pub fn read_biggest_float(v: &AnyType) -> FloatBiggest{
+            unsafe { v.float32 }
+        }
+
+        #[inline]
+        pub fn set_biggest_sint(v: &mut AnyType, val: IntBiggest){
+            v.sint32 = val;
+        }
+
+        #[inline]
+        pub fn set_biggest_uint(v: &mut AnyType, val: UintBiggest){
+            v.uint32 = val;
+        }
+
+        #[inline]
+        pub fn set_biggest_float(v: &mut AnyType, val: FloatBiggest){
+            v.float32 = val;
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -109,5 +193,83 @@ mod tests {
         assert_eq!(VariableTypeSize::VTS32.type_size(), 4);
         assert_eq!(VariableTypeSize::VTS64.type_size(), 8);
         assert_eq!(VariableTypeSize::VTS128.type_size(), 16);
+    }
+
+    #[test]
+    fn test_make_type() {
+        assert_eq!(
+            make_type(VariableTypeType::VTTsint, VariableTypeSize::VTS8),
+            VariableType::Sint8
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTuint, VariableTypeSize::VTS8),
+            VariableType::Uint8
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTfloat, VariableTypeSize::VTS8),
+            VariableType::Float8
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTcfloat, VariableTypeSize::VTS8),
+            VariableType::Cfloat8
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTboolean, VariableTypeSize::VTS8),
+            VariableType::Boolean8
+        );
+
+        assert_eq!(
+            make_type(VariableTypeType::VTTsint, VariableTypeSize::VTS16),
+            VariableType::Sint16
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTuint, VariableTypeSize::VTS16),
+            VariableType::Uint16
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTfloat, VariableTypeSize::VTS16),
+            VariableType::Float16
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTcfloat, VariableTypeSize::VTS16),
+            VariableType::Cfloat16
+        );
+
+        assert_eq!(
+            make_type(VariableTypeType::VTTsint, VariableTypeSize::VTS32),
+            VariableType::Sint32
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTuint, VariableTypeSize::VTS32),
+            VariableType::Uint32
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTfloat, VariableTypeSize::VTS32),
+            VariableType::Float32
+        );
+        assert_eq!(
+            make_type(VariableTypeType::VTTcfloat, VariableTypeSize::VTS32),
+            VariableType::Cfloat32
+        );
+
+        #[cfg(feature = "support_64bits")]
+        {
+            assert_eq!(
+                make_type(VariableTypeType::VTTsint, VariableTypeSize::VTS64),
+                VariableType::Sint64
+            );
+            assert_eq!(
+                make_type(VariableTypeType::VTTuint, VariableTypeSize::VTS64),
+                VariableType::Uint64
+            );
+            assert_eq!(
+                make_type(VariableTypeType::VTTfloat, VariableTypeSize::VTS64),
+                VariableType::Float64
+            );
+            assert_eq!(
+                make_type(VariableTypeType::VTTcfloat, VariableTypeSize::VTS64),
+                VariableType::Cfloat64
+            );
+        }
     }
 }

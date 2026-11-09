@@ -14,7 +14,7 @@ fn make_request(cmd: u8, subfn: u8, payload: &[u8]) -> Vec<u8> {
     frame.push((len >> 8) as u8);
     frame.push((len & 0xFF) as u8);
     frame.extend_from_slice(payload);
-    let crc = crc32(&frame, frame.len(), 0);
+    let crc = crc32(&frame, 0);
     frame.push((crc >> 24) as u8);
     frame.push((crc >> 16) as u8);
     frame.push((crc >> 8) as u8);
@@ -33,7 +33,7 @@ fn make_expected_response(cmd: u8, subfn: u8, code: u8, payload: &[u8]) -> Vec<u
     frame.push((len >> 8) as u8);
     frame.push((len & 0xFF) as u8);
     frame.extend_from_slice(payload);
-    let crc = crc32(&frame, frame.len(), 0);
+    let crc = crc32(&frame, 0);
     frame.push((crc >> 24) as u8);
     frame.push((crc >> 16) as u8);
     frame.push((crc >> 8) as u8);

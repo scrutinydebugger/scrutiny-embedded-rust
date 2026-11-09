@@ -37,7 +37,7 @@ pub struct CommHandler<'buf> {
     // RX FSM
     rx_state: RxFsmState,
     rx_error: RxError,
-    request_received: bool,
+    pending_request: bool,
     last_rx_timestamp: Timestamp,
     /// CRC accumulated over header + payload bytes as they arrive.
     rx_crc: u32,
@@ -57,12 +57,8 @@ impl<'buf> CommHandler<'buf> {
     /// multiple Scrutiny devices share one channel.
     /// Self-disables if either buffer is outside the allowed size range.
     pub fn new(rx_buffer: &'buf mut [u8], tx_buffer: &'buf mut [u8], session_counter_seed: u32) -> Self {
-        let rx_size = rx_buffer.len() as u16;
-        let tx_size = tx_buffer.len() as u16;
-        let enabled = rx_size >= MINIMUM_RX_BUFFER_SIZE
-            && rx_size <= MAXIMUM_RX_BUFFER_SIZE
-            && tx_size >= MINIMUM_TX_BUFFER_SIZE
-            && tx_size <= MAXIMUM_TX_BUFFER_SIZE;
+        let enabled = Self::is_valid_buffer_size(rx_buffer.len(), MINIMUM_RX_BUFFER_SIZE, MAXIMUM_RX_BUFFER_SIZE)
+            && Self::is_valid_buffer_size(tx_buffer.len(), MINIMUM_TX_BUFFER_SIZE, MAXIMUM_TX_BUFFER_SIZE);
 
         Self {
             active_request: Request::new(rx_buffer),
@@ -77,7 +73,7 @@ impl<'buf> CommHandler<'buf> {
             state: CommState::Idle,
             rx_state: RxFsmState::WaitForCommand,
             rx_error: RxError::None,
-            request_received: false,
+            pending_request: false,
             last_rx_timestamp: 0,
             rx_crc: 0,
             per_state_counter: 0,
@@ -101,7 +97,6 @@ impl<'buf> CommHandler<'buf> {
         if !data.is_empty() {
             if tb.has_expired(self.last_rx_timestamp, RX_TIMEOUT_100NS) {
                 self.reset_rx(tb.get_timestamp());
-                self.state = CommState::Idle;
             }
             self.last_rx_timestamp = tb.get_timestamp();
 
@@ -111,7 +106,7 @@ impl<'buf> CommHandler<'buf> {
         }
 
         let mut i = 0usize;
-        while i < data.len() && !self.request_received && self.rx_state != RxFsmState::Error {
+        while i < data.len() && !self.pending_request && self.rx_state != RxFsmState::Error {
             match self.rx_state {
                 RxFsmState::WaitForCommand => {
                     self.rx_crc = 0;
@@ -120,7 +115,7 @@ impl<'buf> CommHandler<'buf> {
                         self.rx_state = RxFsmState::Error;
                     } else {
                         self.active_request.command_id = data[i];
-                        self.rx_crc = crc32(&data[i..=i], 1, self.rx_crc);
+                        self.rx_crc = crc32(&data[i..=i], self.rx_crc);
                         self.rx_state = RxFsmState::WaitForSubfunction;
                         i += 1;
                     }
@@ -128,7 +123,7 @@ impl<'buf> CommHandler<'buf> {
 
                 RxFsmState::WaitForSubfunction => {
                     self.active_request.subfunction_id = data[i];
-                    self.rx_crc = crc32(&data[i..=i], 1, self.rx_crc);
+                    self.rx_crc = crc32(&data[i..=i], self.rx_crc);
                     self.rx_state = RxFsmState::WaitForLength;
                     self.per_state_counter = 0;
                     i += 1;
@@ -138,18 +133,18 @@ impl<'buf> CommHandler<'buf> {
                     if self.per_state_counter == 0 {
                         if data.len() - i >= 2 {
                             self.active_request.data_length = (u16::from(data[i]) << 8) | u16::from(data[i + 1]);
-                            self.rx_crc = crc32(&data[i..i + 2], 2, self.rx_crc);
+                            self.rx_crc = crc32(&data[i..i + 2], self.rx_crc);
                             self.per_state_counter = 2;
                             i += 2;
                         } else {
                             self.active_request.data_length = u16::from(data[i]) << 8;
-                            self.rx_crc = crc32(&data[i..=i], 1, self.rx_crc);
+                            self.rx_crc = crc32(&data[i..=i], self.rx_crc);
                             self.per_state_counter = 1;
                             i += 1;
                         }
                     } else {
                         self.active_request.data_length |= u16::from(data[i]);
-                        self.rx_crc = crc32(&data[i..=i], 1, self.rx_crc);
+                        self.rx_crc = crc32(&data[i..=i], self.rx_crc);
                         self.per_state_counter = 2;
                         i += 1;
                     }
@@ -180,7 +175,7 @@ impl<'buf> CommHandler<'buf> {
 
                     let dst = self.per_state_counter as usize;
                     self.active_request.buffer[dst..dst + to_read].copy_from_slice(&data[i..i + to_read]);
-                    self.rx_crc = crc32(&data[i..i + to_read], to_read, self.rx_crc);
+                    self.rx_crc = crc32(&data[i..i + to_read], self.rx_crc);
                     self.per_state_counter += to_read as u16;
                     i += to_read;
 
@@ -214,12 +209,12 @@ impl<'buf> CommHandler<'buf> {
     /// Returns `true` if a complete, CRC-validated request is waiting to be processed.
     /// Stays `true` until [`wait_next_request`](Self::wait_next_request) is called.
     pub fn request_received(&self) -> bool {
-        self.request_received
+        self.pending_request
     }
 
     /// Returns the pending request, or `None` if no request has been received yet.
     pub fn get_request(&self) -> Option<&Request<'_>> {
-        if !self.request_received {
+        if !self.pending_request {
             return None;
         }
         Some(&self.active_request)
@@ -323,7 +318,7 @@ impl<'buf> CommHandler<'buf> {
         // CRC (4 bytes, big-endian)
         let crc_start = self.active_response.data_length + 5;
         while i < to_copy && self.nbytes_sent < self.nbytes_to_send {
-            let crc_byte = self.nbytes_sent - crc_start;
+            let crc_byte = u32::from(self.nbytes_sent - crc_start);
             out[i as usize] = ((self.active_response.crc >> (24 - crc_byte * 8)) & 0xFF) as u8;
             i += 1;
             self.nbytes_sent += 1;
@@ -440,12 +435,12 @@ impl<'buf> CommHandler<'buf> {
 
     /// Size of the RX buffer in bytes.
     pub fn rx_buffer_size(&self) -> u16 {
-        self.active_request.buffer.len() as u16
+        u16::try_from(self.active_request.buffer.len()).unwrap_or(u16::MAX)
     }
 
     /// Size of the TX buffer in bytes.
     pub fn tx_buffer_size(&self) -> u16 {
-        self.active_response.buffer.len() as u16
+        u16::try_from(self.active_response.buffer.len()).unwrap_or(u16::MAX)
     }
 
     /// Resets all state including the session.
@@ -465,7 +460,7 @@ impl<'buf> CommHandler<'buf> {
     fn reset_rx(&mut self, last_rx_timestamp: Timestamp) {
         self.active_request.reset();
         self.rx_state = RxFsmState::WaitForCommand;
-        self.request_received = false;
+        self.pending_request = false;
         self.rx_error = RxError::None;
         self.last_rx_timestamp = last_rx_timestamp;
         self.rx_crc = 0;
@@ -496,7 +491,7 @@ impl<'buf> CommHandler<'buf> {
 
         if must_process {
             self.rx_state = RxFsmState::WaitForProcess;
-            self.request_received = true;
+            self.pending_request = true;
         } else {
             self.reset_rx(self.last_rx_timestamp);
         }
@@ -520,9 +515,13 @@ impl<'buf> CommHandler<'buf> {
             && self.active_request.subfunction_id == CommControlSubfn::Connect as u8
     }
 
+    fn is_valid_buffer_size(len: usize, min: u16, max: u16) -> bool {
+        u16::try_from(len).map_or(false, |s| s >= min && s <= max)
+    }
+
     fn compute_response_crc(cmd: u8, subfn: u8, code: u8, data_len: u16, payload: &[u8]) -> u32 {
         let header: [u8; 5] = [cmd, subfn, code, (data_len >> 8) as u8, (data_len & 0xFF) as u8];
-        let crc = crc32(&header, 5, 0);
-        crc32(payload, payload.len(), crc)
+        let crc = crc32(&header, 0);
+        crc32(payload, crc)
     }
 }

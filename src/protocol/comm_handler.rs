@@ -169,13 +169,10 @@ impl<'buf> CommHandler<'buf> {
                         break;
                     }
 
-                    let available = match u16::try_from(data.len() - i) {
-                        Ok(n) => n,
-                        Err(_) => {
-                            self.rx_error = RxError::Overflow;
-                            self.rx_state = RxFsmState::Error;
-                            break;
-                        }
+                    let Ok(available) = u16::try_from(data.len() - i) else {
+                        self.rx_error = RxError::Overflow;
+                        self.rx_state = RxFsmState::Error;
+                        break;
                     };
                     let missing = self.active_request.data_length - self.per_state_counter;
                     let to_read = available.min(missing);

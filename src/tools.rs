@@ -53,7 +53,7 @@ pub enum Status {
 
 #[inline]
 pub fn get_var_type_type(vt: VariableType) -> VariableTypeType {
-    unsafe { core::mem::transmute((vt as u8) & 0xF0) } //
+    unsafe { core::mem::transmute((vt as u8) & 0xF0) }
 }
 
 #[inline]

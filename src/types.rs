@@ -94,6 +94,19 @@ pub struct RuntimePublishedValue {
     pub var_type: VariableType,
 }
 
+#[cfg(feature = "protected_regions")]
+#[derive(Clone, Copy)]
+pub struct AddressRange {
+    pub start: *const u8,
+    pub end: *const u8,
+}
+
+// Raw pointers are not auto-Send/Sync; these represent static hardware address constants, not ownership.
+#[cfg(feature = "protected_regions")]
+unsafe impl Send for AddressRange {}
+#[cfg(feature = "protected_regions")]
+unsafe impl Sync for AddressRange {}
+
 /// A point-in-time snapshot used as a reference for elapsed-time calculations. Units: 100 ns ticks.
 pub type Timestamp = u32;
 

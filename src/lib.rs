@@ -5,6 +5,7 @@
 #![allow(clippy::too_many_lines)]
 
 pub mod build_config;
+pub mod config;
 pub mod protocol;
 pub mod timebase;
 pub mod tools;

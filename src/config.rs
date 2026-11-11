@@ -10,7 +10,7 @@ pub type RpvReadCallback = fn(RuntimePublishedValue, &mut AnyType) -> bool;
 pub type RpvWriteCallback = fn(RuntimePublishedValue, &AnyType) -> bool;
 
 /// Callback for the `UserCommand` service.
-/// Arguments: subfunction, request_data, response_data, response_data_length.
+/// Arguments: subfunction, `request_data`, `response_data`, `response_data_length`.
 pub type UserCommandCallback = fn(u8, &[u8], &mut [u8], &mut u16);
 
 #[cfg(feature = "datalogging")]
@@ -52,6 +52,8 @@ pub struct Config<'buf> {
 }
 
 impl<'buf> Config<'buf> {
+    /// Creates a new `Config` with safe defaults (`memory_write_enable = true`, everything else unset).
+    #[must_use]
     pub fn new() -> Self {
         Self {
             rx_buffer: None,
@@ -100,25 +102,25 @@ impl<'buf> Config<'buf> {
     }
 
     /// Sets the communication buffers. The bigger the buffers, the more data a single request can carry.
-    pub fn set_buffers(&mut self, rx_buffer: &'buf mut [u8], tx_buffer: &'buf mut [u8]) {
+    pub const fn set_buffers(&mut self, rx_buffer: &'buf mut [u8], tx_buffer: &'buf mut [u8]) {
         self.rx_buffer = Some(rx_buffer);
         self.tx_buffer = Some(tx_buffer);
     }
 
     #[cfg(feature = "protected_regions")]
     /// Defines memory regions that Scrutiny will never read or write.
-    pub fn set_forbidden_address_range(&mut self, ranges: &'static [AddressRange]) {
+    pub const fn set_forbidden_address_range(&mut self, ranges: &'static [AddressRange]) {
         self.forbidden_ranges = Some(ranges);
     }
 
     #[cfg(feature = "protected_regions")]
     /// Defines memory regions that Scrutiny will never write.
-    pub fn set_readonly_address_range(&mut self, ranges: &'static [AddressRange]) {
+    pub const fn set_readonly_address_range(&mut self, ranges: &'static [AddressRange]) {
         self.readonly_ranges = Some(ranges);
     }
 
     /// Configures Runtime Published Values and their read/write callbacks.
-    pub fn set_published_values(
+    pub const fn set_published_values(
         &mut self,
         array: &'static [RuntimePublishedValue],
         rd_cb: Option<RpvReadCallback>,
@@ -130,124 +132,139 @@ impl<'buf> Config<'buf> {
     }
 
     /// Sets the callback for `UserCommand` service requests.
-    pub fn set_user_command_callback(&mut self, callback: UserCommandCallback) {
+    pub const fn set_user_command_callback(&mut self, callback: UserCommandCallback) {
         self.user_command_callback = Some(callback);
     }
 
     #[cfg(feature = "datalogging")]
     /// Sets the buffer used for datalogging acquisitions.
-    pub fn set_datalogging_buffer(&mut self, buffer: &'buf mut [u8]) {
+    pub const fn set_datalogging_buffer(&mut self, buffer: &'buf mut [u8]) {
         self.datalogging_buffer = Some(buffer);
     }
 
     #[cfg(feature = "datalogging")]
     /// Sets the callback fired when a datalogging acquisition triggers.
-    pub fn set_datalogging_trigger_callback(&mut self, callback: DataloggingTriggerCallback) {
+    pub const fn set_datalogging_trigger_callback(&mut self, callback: DataloggingTriggerCallback) {
         self.datalogging_trigger_callback = Some(callback);
     }
 
     /// Returns `true` if both communication buffers have been set.
-    pub fn is_buffer_set(&self) -> bool {
+    #[must_use]
+    pub const fn is_buffer_set(&self) -> bool {
         self.rx_buffer.is_some() && self.tx_buffer.is_some()
     }
 
     #[cfg(feature = "protected_regions")]
     /// Returns `true` if forbidden address ranges have been defined.
-    pub fn is_forbidden_address_range_set(&self) -> bool {
+    #[must_use]
+    pub const fn is_forbidden_address_range_set(&self) -> bool {
         self.forbidden_ranges.is_some()
     }
 
     #[cfg(feature = "protected_regions")]
     /// Returns `true` if read-only address ranges have been defined.
-    pub fn is_readonly_address_range_set(&self) -> bool {
+    #[must_use]
+    pub const fn is_readonly_address_range_set(&self) -> bool {
         self.readonly_ranges.is_some()
     }
 
     /// Returns `true` if RPVs and a read callback are both configured.
+    #[must_use]
     pub fn is_read_published_values_configured(&self) -> bool {
         self.rpv_read_callback.is_some() && self.rpvs.is_some_and(|s| !s.is_empty())
     }
 
     /// Returns `true` if RPVs and a write callback are both configured.
+    #[must_use]
     pub fn is_write_published_values_configured(&self) -> bool {
         self.rpv_write_callback.is_some() && self.rpvs.is_some_and(|s| !s.is_empty())
     }
 
     /// Returns `true` if a `UserCommand` callback has been registered.
-    pub fn is_user_command_callback_set(&self) -> bool {
+    #[must_use]
+    pub const fn is_user_command_callback_set(&self) -> bool {
         self.user_command_callback.is_some()
     }
 
     #[cfg(feature = "datalogging")]
     /// Returns `true` if a non-empty datalogging buffer has been set.
+    #[must_use]
     pub fn is_datalogging_configured(&self) -> bool {
         self.datalogging_buffer.as_deref().is_some_and(|b| !b.is_empty())
     }
 
     #[cfg(feature = "protected_regions")]
     /// Returns the forbidden address ranges, or `None` if unset.
-    pub fn forbidden_ranges(&self) -> Option<&'static [AddressRange]> {
+    #[must_use]
+    pub const fn forbidden_ranges(&self) -> Option<&'static [AddressRange]> {
         self.forbidden_ranges
     }
 
     #[cfg(feature = "protected_regions")]
     /// Returns the read-only address ranges, or `None` if unset.
-    pub fn readonly_ranges(&self) -> Option<&'static [AddressRange]> {
+    #[must_use]
+    pub const fn readonly_ranges(&self) -> Option<&'static [AddressRange]> {
         self.readonly_ranges
     }
 
     /// Returns the RPV array, or `None` if unset.
-    pub fn get_rpvs_array(&self) -> Option<&'static [RuntimePublishedValue]> {
+    #[must_use]
+    pub const fn get_rpvs_array(&self) -> Option<&'static [RuntimePublishedValue]> {
         self.rpvs
     }
 
     /// Returns the number of configured RPVs.
+    #[must_use]
     pub fn get_rpv_count(&self) -> u16 {
         self.rpvs.map_or(0, |s| u16::try_from(s.len()).unwrap_or(u16::MAX))
     }
 
     /// Returns the RPV read callback, or `None` if unset.
-    pub fn get_rpv_read_callback(&self) -> Option<RpvReadCallback> {
+    #[must_use]
+    pub const fn get_rpv_read_callback(&self) -> Option<RpvReadCallback> {
         self.rpv_read_callback
     }
 
     /// Returns the RPV write callback, or `None` if unset.
-    pub fn get_rpv_write_callback(&self) -> Option<RpvWriteCallback> {
+    #[must_use]
+    pub const fn get_rpv_write_callback(&self) -> Option<RpvWriteCallback> {
         self.rpv_write_callback
     }
 
     /// Returns the `UserCommand` callback, or `None` if unset.
-    pub fn get_user_command_callback(&self) -> Option<UserCommandCallback> {
+    #[must_use]
+    pub const fn get_user_command_callback(&self) -> Option<UserCommandCallback> {
         self.user_command_callback
     }
 
     #[cfg(feature = "datalogging")]
     /// Returns the datalogging trigger callback, or `None` if unset.
-    pub fn get_datalogging_trigger_callback(&self) -> Option<DataloggingTriggerCallback> {
+    #[must_use]
+    pub const fn get_datalogging_trigger_callback(&self) -> Option<DataloggingTriggerCallback> {
         self.datalogging_trigger_callback
     }
 
     /// Moves the RX buffer out of the config; used by `MainHandler` during initialization.
     #[allow(dead_code)]
-    pub(crate) fn take_rx_buffer(&mut self) -> Option<&'buf mut [u8]> {
+    pub(crate) const fn take_rx_buffer(&mut self) -> Option<&'buf mut [u8]> {
         self.rx_buffer.take()
     }
 
     /// Moves the TX buffer out of the config; used by `MainHandler` during initialization.
     #[allow(dead_code)]
-    pub(crate) fn take_tx_buffer(&mut self) -> Option<&'buf mut [u8]> {
+    pub(crate) const fn take_tx_buffer(&mut self) -> Option<&'buf mut [u8]> {
         self.tx_buffer.take()
     }
 
     #[cfg(feature = "datalogging")]
     /// Moves the datalogging buffer out of the config; used by `MainHandler` during initialization.
     #[allow(dead_code)]
-    pub(crate) fn take_datalogging_buffer(&mut self) -> Option<&'buf mut [u8]> {
+    pub(crate) const fn take_datalogging_buffer(&mut self) -> Option<&'buf mut [u8]> {
         self.datalogging_buffer.take()
     }
 }
 
-impl<'buf> Default for Config<'buf> {
+impl Default for Config<'_> {
     fn default() -> Self {
         Self::new()
     }

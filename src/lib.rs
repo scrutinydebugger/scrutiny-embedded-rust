@@ -6,7 +6,9 @@
 
 pub mod build_config;
 pub mod config;
+pub mod main_handler;
 pub mod protocol;
+pub mod software_id;
 pub mod timebase;
 pub mod tools;
 pub mod types;

@@ -21,9 +21,9 @@ pub type DataloggingTriggerCallback = fn();
 ///
 /// Caller-allocated buffers are borrowed for lifetime `'buf`; all array pointers
 /// (`rpvs`, address ranges) must be `'static` — no copy is made.
-pub struct Config<'buf> {
-    rx_buffer: Option<&'buf mut [u8]>,
-    tx_buffer: Option<&'buf mut [u8]>,
+pub struct Config<'rxbuf, 'txbuf> {
+    rx_buffer: Option<&'rxbuf mut [u8]>,
+    tx_buffer: Option<&'txbuf mut [u8]>,
 
     #[cfg(feature = "protected_regions")]
     forbidden_ranges: Option<&'static [AddressRange]>,
@@ -36,11 +36,6 @@ pub struct Config<'buf> {
 
     user_command_callback: Option<UserCommandCallback>,
 
-    #[cfg(feature = "datalogging")]
-    datalogging_buffer: Option<&'buf mut [u8]>,
-    #[cfg(feature = "datalogging")]
-    datalogging_trigger_callback: Option<DataloggingTriggerCallback>,
-
     /// Maximum bitrate in bits/sec, enforced by the server.
     pub max_bitrate: u32,
     /// Seed for the session counter; avoids ID collision when multiple devices share one channel.
@@ -51,7 +46,7 @@ pub struct Config<'buf> {
     pub memory_write_enable: bool,
 }
 
-impl<'buf> Config<'buf> {
+impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
     /// Creates a new `Config` with safe defaults (`memory_write_enable = true`, everything else unset).
     #[must_use]
     pub fn new() -> Self {
@@ -66,10 +61,6 @@ impl<'buf> Config<'buf> {
             rpv_read_callback: None,
             rpv_write_callback: None,
             user_command_callback: None,
-            #[cfg(feature = "datalogging")]
-            datalogging_buffer: None,
-            #[cfg(feature = "datalogging")]
-            datalogging_trigger_callback: None,
             max_bitrate: 0,
             session_counter_seed: 0,
             display_name: "",
@@ -90,11 +81,6 @@ impl<'buf> Config<'buf> {
         self.rpv_read_callback = None;
         self.rpv_write_callback = None;
         self.user_command_callback = None;
-        #[cfg(feature = "datalogging")]
-        {
-            self.datalogging_buffer = None;
-            self.datalogging_trigger_callback = None;
-        }
         self.max_bitrate = 0;
         self.session_counter_seed = 0;
         self.display_name = "";
@@ -102,7 +88,7 @@ impl<'buf> Config<'buf> {
     }
 
     /// Sets the communication buffers. The bigger the buffers, the more data a single request can carry.
-    pub const fn set_buffers(&mut self, rx_buffer: &'buf mut [u8], tx_buffer: &'buf mut [u8]) {
+    pub const fn set_buffers(&mut self, rx_buffer: &'rxbuf mut [u8], tx_buffer: &'txbuf mut [u8]) {
         self.rx_buffer = Some(rx_buffer);
         self.tx_buffer = Some(tx_buffer);
     }
@@ -134,18 +120,6 @@ impl<'buf> Config<'buf> {
     /// Sets the callback for `UserCommand` service requests.
     pub const fn set_user_command_callback(&mut self, callback: UserCommandCallback) {
         self.user_command_callback = Some(callback);
-    }
-
-    #[cfg(feature = "datalogging")]
-    /// Sets the buffer used for datalogging acquisitions.
-    pub const fn set_datalogging_buffer(&mut self, buffer: &'buf mut [u8]) {
-        self.datalogging_buffer = Some(buffer);
-    }
-
-    #[cfg(feature = "datalogging")]
-    /// Sets the callback fired when a datalogging acquisition triggers.
-    pub const fn set_datalogging_trigger_callback(&mut self, callback: DataloggingTriggerCallback) {
-        self.datalogging_trigger_callback = Some(callback);
     }
 
     /// Returns `true` if both communication buffers have been set.
@@ -184,13 +158,6 @@ impl<'buf> Config<'buf> {
     #[must_use]
     pub const fn is_user_command_callback_set(&self) -> bool {
         self.user_command_callback.is_some()
-    }
-
-    #[cfg(feature = "datalogging")]
-    /// Returns `true` if a non-empty datalogging buffer has been set.
-    #[must_use]
-    pub fn is_datalogging_configured(&self) -> bool {
-        self.datalogging_buffer.as_deref().is_some_and(|b| !b.is_empty())
     }
 
     #[cfg(feature = "protected_regions")]
@@ -237,34 +204,20 @@ impl<'buf> Config<'buf> {
         self.user_command_callback
     }
 
-    #[cfg(feature = "datalogging")]
-    /// Returns the datalogging trigger callback, or `None` if unset.
-    #[must_use]
-    pub const fn get_datalogging_trigger_callback(&self) -> Option<DataloggingTriggerCallback> {
-        self.datalogging_trigger_callback
-    }
-
     /// Moves the RX buffer out of the config; used by `MainHandler` during initialization.
     #[allow(dead_code)]
-    pub(crate) const fn take_rx_buffer(&mut self) -> Option<&'buf mut [u8]> {
+    pub(crate) const fn take_rx_buffer(&mut self) -> Option<&'rxbuf mut [u8]> {
         self.rx_buffer.take()
     }
 
     /// Moves the TX buffer out of the config; used by `MainHandler` during initialization.
     #[allow(dead_code)]
-    pub(crate) const fn take_tx_buffer(&mut self) -> Option<&'buf mut [u8]> {
+    pub(crate) const fn take_tx_buffer(&mut self) -> Option<&'txbuf mut [u8]> {
         self.tx_buffer.take()
-    }
-
-    #[cfg(feature = "datalogging")]
-    /// Moves the datalogging buffer out of the config; used by `MainHandler` during initialization.
-    #[allow(dead_code)]
-    pub(crate) const fn take_datalogging_buffer(&mut self) -> Option<&'buf mut [u8]> {
-        self.datalogging_buffer.take()
     }
 }
 
-impl Default for Config<'_> {
+impl Default for Config<'_, '_> {
     fn default() -> Self {
         Self::new()
     }
@@ -314,7 +267,10 @@ mod tests {
 
     #[test]
     fn rpv_configured_requires_non_empty_array_and_callback() {
-        static RPVS: [RuntimePublishedValue; 1] = [RuntimePublishedValue { id: 1, var_type: VariableType::Uint32 }];
+        static RPVS: [RuntimePublishedValue; 1] = [RuntimePublishedValue {
+            id: 1,
+            var_type: VariableType::Uint32,
+        }];
         fn read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType) -> bool {
             true
         }
@@ -334,7 +290,10 @@ mod tests {
 
     #[test]
     fn rpv_read_only_or_write_only() {
-        static RPVS: [RuntimePublishedValue; 1] = [RuntimePublishedValue { id: 2, var_type: VariableType::Sint32 }];
+        static RPVS: [RuntimePublishedValue; 1] = [RuntimePublishedValue {
+            id: 2,
+            var_type: VariableType::Sint32,
+        }];
         fn read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType) -> bool {
             false
         }
@@ -369,8 +328,14 @@ mod tests {
     #[cfg(feature = "protected_regions")]
     #[test]
     fn protected_regions() {
-        static FORBIDDEN: [AddressRange; 1] = [AddressRange { start: 0x1000 as *const u8, end: 0x2000 as *const u8 }];
-        static READONLY: [AddressRange; 1] = [AddressRange { start: 0x3000 as *const u8, end: 0x4000 as *const u8 }];
+        static FORBIDDEN: [AddressRange; 1] = [AddressRange {
+            start: 0x1000 as *const u8,
+            end: 0x2000 as *const u8,
+        }];
+        static READONLY: [AddressRange; 1] = [AddressRange {
+            start: 0x3000 as *const u8,
+            end: 0x4000 as *const u8,
+        }];
 
         let mut cfg = Config::new();
         assert!(!cfg.is_forbidden_address_range_set());
@@ -383,15 +348,5 @@ mod tests {
         assert!(cfg.is_readonly_address_range_set());
         assert_eq!(cfg.forbidden_ranges().unwrap().len(), 1);
         assert_eq!(cfg.readonly_ranges().unwrap().len(), 1);
-    }
-
-    #[cfg(feature = "datalogging")]
-    #[test]
-    fn datalogging_configured() {
-        let mut buf = [0u8; 256];
-        let mut cfg = Config::new();
-        assert!(!cfg.is_datalogging_configured());
-        cfg.set_datalogging_buffer(&mut buf);
-        assert!(cfg.is_datalogging_configured());
     }
 }

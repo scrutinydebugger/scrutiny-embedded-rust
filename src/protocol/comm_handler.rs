@@ -18,9 +18,9 @@ use super::definitions::{
 ///
 /// Methods that need to read the current time take `tb: &Timebase` explicitly
 /// so the caller keeps sole ownership of the timebase.
-pub struct CommHandler<'buf> {
-    active_request: Request<'buf>,
-    active_response: Response<'buf>,
+pub struct CommHandler<'rxbuf, 'txbuf> {
+    active_request: Request<'rxbuf>,
+    active_response: Response<'txbuf>,
 
     // session
     session_counter: u32,
@@ -50,13 +50,13 @@ pub struct CommHandler<'buf> {
     nbytes_sent: u16,
 }
 
-impl<'buf> CommHandler<'buf> {
+impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
     /// Creates a new `CommHandler`.
     ///
     /// `session_counter_seed` offsets session IDs to avoid collisions when
     /// multiple Scrutiny devices share one channel.
     /// Self-disables if either buffer is outside the allowed size range.
-    pub fn new(rx_buffer: &'buf mut [u8], tx_buffer: &'buf mut [u8], session_counter_seed: u32) -> Self {
+    pub fn new(rx_buffer: &'rxbuf mut [u8], tx_buffer: &'txbuf mut [u8], session_counter_seed: u32) -> Self {
         let enabled = Self::is_valid_buffer_size(rx_buffer.len(), MINIMUM_RX_BUFFER_SIZE, MAXIMUM_RX_BUFFER_SIZE)
             && Self::is_valid_buffer_size(tx_buffer.len(), MINIMUM_TX_BUFFER_SIZE, MAXIMUM_TX_BUFFER_SIZE);
 
@@ -231,6 +231,19 @@ impl<'buf> CommHandler<'buf> {
         Some(&self.active_request)
     }
 
+    /// Returns simultaneous references to the pending request and the (reset) response buffer,
+    /// or `None` if no request is pending.
+    ///
+    /// Use this when you need to read the request and fill the response in the same scope —
+    /// Rust allows the two borrows because they come from distinct fields.
+    pub const fn get_req_and_response(&mut self) -> Option<(&Request<'rxbuf>, &mut Response<'txbuf>)> {
+        if !self.pending_request {
+            return None;
+        }
+        self.active_response.reset();
+        Some((&self.active_request, &mut self.active_response))
+    }
+
     /// Clears the pending request and readies the RX path for the next frame.
     pub fn wait_next_request(&mut self, tb: &Timebase) {
         self.reset_rx(tb.get_timestamp());
@@ -240,7 +253,7 @@ impl<'buf> CommHandler<'buf> {
     /// Set [`Response::command_id`], [`Response::subfunction_id`],
     /// [`Response::response_code`], [`Response::data_length`], and write payload
     /// bytes via [`Response::payload`], then call [`send_response`](Self::send_response).
-    pub const fn prepare_response(&mut self) -> &mut Response<'buf> {
+    pub const fn prepare_response(&mut self) -> &mut Response<'txbuf> {
         self.active_response.reset();
         &mut self.active_response
     }

@@ -1,3 +1,4 @@
+pub mod codec_v1_0;
 pub mod comm_handler;
 pub mod definitions;
 

@@ -94,6 +94,20 @@ pub enum CommandId {
     DataLogControl = 0x05,
 }
 
+impl TryFrom<u8> for CommandId {
+    type Error = ();
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            x if x == Self::GetInfo as u8 => Ok(Self::GetInfo),
+            x if x == Self::CommControl as u8 => Ok(Self::CommControl),
+            x if x == Self::MemoryControl as u8 => Ok(Self::MemoryControl),
+            x if x == Self::UserCommand as u8 => Ok(Self::UserCommand),
+            x if x == Self::DataLogControl as u8 => Ok(Self::DataLogControl),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ResponseCode {
@@ -132,6 +146,20 @@ pub enum CommControlSubfn {
     GetParams = 3,
     Connect = 4,
     Disconnect = 5,
+}
+
+impl TryFrom<u8> for CommControlSubfn {
+    type Error = ();
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            x if x == Self::Discover as u8 => Ok(Self::Discover),
+            x if x == Self::Heartbeat as u8 => Ok(Self::Heartbeat),
+            x if x == Self::GetParams as u8 => Ok(Self::GetParams),
+            x if x == Self::Connect as u8 => Ok(Self::Connect),
+            x if x == Self::Disconnect as u8 => Ok(Self::Disconnect),
+            _ => Err(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

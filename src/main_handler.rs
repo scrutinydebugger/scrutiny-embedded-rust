@@ -1,9 +1,10 @@
+use crate::build_config;
 use crate::config::Config;
 use crate::protocol::codec_v1_0;
 use crate::protocol::definitions::{CommControlSubfn, CommandId, Response, ResponseCode};
 use crate::protocol::CommHandler;
 use crate::timebase::Timebase;
-use crate::types::Timediff;
+use crate::types::{Timediff, Timestamp};
 
 /// Top-level Scrutiny handler. Owns the communication buffers and drives the protocol.
 pub struct MainHandler<'rxbuf, 'txbuf> {
@@ -13,6 +14,8 @@ pub struct MainHandler<'rxbuf, 'txbuf> {
     processing_request: bool,
     disconnect_pending: bool,
     display_name: &'static str,
+    process_again_timestamp: Timestamp,
+    process_again_timestamp_taken: bool,
 }
 
 impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
@@ -34,6 +37,8 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             processing_request: false,
             disconnect_pending: false,
             display_name,
+            process_again_timestamp: 0,
+            process_again_timestamp_taken: false,
         })
     }
 
@@ -42,6 +47,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         if !self.enabled {
             self.processing_request = false;
             self.disconnect_pending = false;
+            self.process_again_timestamp_taken = false;
             self.comm.reset(&self.timebase);
             return;
         }
@@ -60,13 +66,31 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                     self.display_name,
                     response,
                 );
-                response.response_code = code as u8;
-                if code != ResponseCode::Ok {
-                    response.data_length = 0;
-                }
-                self.processing_request = true;
-                if code != ResponseCode::NoResponseToSend {
-                    self.comm.send_response();
+
+                if code == ResponseCode::ProcessAgain {
+                    // Handler isn't ready yet; retry next cycle.
+                    // If the timeout expires, force a FailureToProceed response.
+                    if !self.process_again_timestamp_taken {
+                        self.process_again_timestamp = self.timebase.get_timestamp();
+                        self.process_again_timestamp_taken = true;
+                    } else if self.timebase.has_expired(
+                        self.process_again_timestamp,
+                        build_config::REQUEST_MAX_PROCESS_TIME_US * 10,
+                    ) {
+                        response.response_code = ResponseCode::FailureToProceed as u8;
+                        response.data_length = 0;
+                        self.comm.send_response();
+                        self.processing_request = true;
+                    }
+                } else {
+                    response.response_code = code as u8;
+                    if code != ResponseCode::Ok {
+                        response.data_length = 0;
+                    }
+                    self.processing_request = true;
+                    if code != ResponseCode::NoResponseToSend {
+                        self.comm.send_response();
+                    }
                 }
             }
         }
@@ -102,6 +126,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         if self.processing_request && !self.comm.transmitting() {
             self.comm.wait_next_request(&self.timebase);
             self.processing_request = false;
+            self.process_again_timestamp_taken = false;
 
             if self.disconnect_pending {
                 self.comm.disconnect(&self.timebase);
@@ -117,10 +142,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         display_name: &'static str,
         response: &mut Response<'_>,
     ) -> ResponseCode {
-        if cmd_id == CommandId::CommControl as u8 {
-            Self::process_comm_control(subfn_id, data, display_name, response)
-        } else {
-            ResponseCode::UnsupportedFeature
+        match CommandId::try_from(cmd_id) {
+            Ok(CommandId::CommControl) => Self::process_comm_control(subfn_id, data, display_name, response),
+            Ok(CommandId::GetInfo | CommandId::MemoryControl | CommandId::UserCommand | CommandId::DataLogControl)
+            | Err(()) => ResponseCode::UnsupportedFeature,
         }
     }
 
@@ -130,10 +155,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         display_name: &'static str,
         response: &mut Response<'_>,
     ) -> ResponseCode {
-        if subfn_id == CommControlSubfn::Discover as u8 {
-            codec_v1_0::encode_discover(data, display_name, response)
-        } else {
-            ResponseCode::UnsupportedFeature
+        match CommControlSubfn::try_from(subfn_id) {
+            Ok(CommControlSubfn::Discover) => codec_v1_0::encode_discover(data, display_name, response),
+            Ok(CommControlSubfn::Heartbeat | CommControlSubfn::GetParams | CommControlSubfn::Connect | CommControlSubfn::Disconnect)
+            | Err(()) => ResponseCode::UnsupportedFeature,
         }
     }
 }

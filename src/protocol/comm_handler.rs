@@ -233,20 +233,20 @@ impl CommHandler {
         self.pending_request
     }
 
-    /// Returns the pending request metadata and a zero-copy slice into `rx_buf`,
+    /// Returns the pending request metadata `(command_id, subfunction_id, data_length)`,
     /// or `None` if no request is pending.
     ///
-    /// The returned data slice has the lifetime of `rx_buf`, not of `self`, so the
-    /// caller can mutably borrow other `CommHandler` methods while the slice is live.
+    /// The caller slices into its own RX buffer using the returned `data_length` and must
+    /// verify that the buffer is at least that many bytes before indexing.
     #[must_use]
-    pub fn get_request<'rx>(&self, rx_buf: &'rx [u8]) -> Option<(u8, u8, &'rx [u8])> {
+    pub const fn get_request(&self) -> Option<(u8, u8, u16)> {
         if !self.pending_request {
             return None;
         }
         Some((
             self.active_request.command_id,
             self.active_request.subfunction_id,
-            &rx_buf[..self.active_request.data_length as usize],
+            self.active_request.data_length,
         ))
     }
 
@@ -547,7 +547,7 @@ impl CommHandler {
         if (self.active_request.data_length as usize) < DISCOVER_MAGIC.len() {
             return false;
         }
-        rx_buf[..DISCOVER_MAGIC.len()] == DISCOVER_MAGIC
+        rx_buf.get(..DISCOVER_MAGIC.len()).is_some_and(|s| s == DISCOVER_MAGIC)
     }
 
     const fn is_connect_request(&self) -> bool {

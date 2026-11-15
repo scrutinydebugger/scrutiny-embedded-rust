@@ -329,3 +329,19 @@ fn test_disconnect_wrong_session_id() {
     assert_eq!(resp[2], ResponseCode::InvalidRequest as u8);
     assert!(h.is_connected());
 }
+
+#[test]
+fn test_connect_wrong_magic() {
+    let mut rx = [0u8; 64];
+    let mut tx = [0u8; 64];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    let mut h = MainHandler::new(cfg).unwrap();
+
+    let bad_magic = [0x00u8, 0x00, 0x00, 0x00];
+    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &bad_magic);
+    let resp = send_and_recv(&mut h, &req);
+
+    assert_eq!(resp[2], ResponseCode::InvalidRequest as u8);
+    assert!(!h.is_connected());
+}

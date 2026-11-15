@@ -52,7 +52,7 @@ impl Response {
         Self { command_id: 0, subfunction_id: 0, response_code: 0, data_length: 0, crc: 0 }
     }
 
-    pub(super) const fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.command_id = 0;
         self.subfunction_id = 0;
         self.response_code = 0;

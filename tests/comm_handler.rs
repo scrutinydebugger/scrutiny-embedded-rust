@@ -187,10 +187,10 @@ fn test_rx_framing_valid() {
     comm.receive_data(&frame, &mut rx, &tb);
 
     assert!(comm.request_received());
-    let (cmd, subfn, data) = comm.get_request(&rx).expect("request must be present");
+    let (cmd, subfn, data_len) = comm.get_request().expect("request must be present");
     assert_eq!(cmd, 0x01);
     assert_eq!(subfn, 0x02);
-    assert_eq!(data, &payload);
+    assert_eq!(&rx[..data_len as usize], &payload);
 }
 
 #[test]
@@ -273,8 +273,8 @@ fn test_rx_chunked_delivery() {
     }
 
     assert!(comm.request_received());
-    let (_, _, data) = comm.get_request(&rx).unwrap();
-    assert_eq!(data, &payload);
+    let (_, _, data_len) = comm.get_request().unwrap();
+    assert_eq!(&rx[..data_len as usize], &payload);
 }
 
 #[test]
@@ -292,7 +292,7 @@ fn test_discover_without_session() {
     comm.receive_data(&frame, &mut rx, &tb);
 
     assert!(comm.request_received());
-    let (cmd, subfn, _) = comm.get_request(&rx).unwrap();
+    let (cmd, subfn, _) = comm.get_request().unwrap();
     assert_eq!(cmd, CommandId::CommControl as u8);
     assert_eq!(subfn, CommControlSubfn::Discover as u8);
 }

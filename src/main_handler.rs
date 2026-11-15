@@ -63,10 +63,23 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         self.comm.process(&self.timebase);
 
         if self.comm.request_received() && !self.processing_request {
-            let Some((cmd_id, subfn_id, data)) = self.comm.get_request(&*self.rx_buf) else {
+            let Some((cmd_id, subfn_id, data_len)) = self.comm.get_request() else {
                 self.check_finished_sending();
                 return;
             };
+
+            let data_len_usize = usize::from(data_len);
+            if data_len_usize > self.rx_buf.len() {
+                // CommHandler guarantees data_length <= rx_buf.len(), so this is unreachable
+                // in normal operation. Bail silently rather than panic.
+                self.enabled = false;
+                return;
+            }
+
+            // Reset so dispatch always starts from a clean response; prevents stale
+            // data_length from a previous ProcessAgain cycle leaking into the response.
+            self.comm.active_response_mut().reset();
+            let data = &self.rx_buf[..data_len_usize];
 
             let code = Self::dispatch(
                 &mut self.comm,
@@ -264,8 +277,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(CommControlSubfn::Connect) => {
-                // Request: 4 bytes (the CONNECT_MAGIC); only length is validated.
-                if data.len() != CONNECT_MAGIC.len() {
+                if data.len() != CONNECT_MAGIC.len() || data != CONNECT_MAGIC {
                     return ResponseCode::InvalidRequest;
                 }
                 if comm.is_connected() {
@@ -296,7 +308,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                     }
                     *disconnect_pending = true;
                 }
-                // Response: empty payload (data_length stays 0 from prepare_response).
                 ResponseCode::Ok
             }
 

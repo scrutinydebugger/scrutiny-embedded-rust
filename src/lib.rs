@@ -6,6 +6,7 @@
 
 pub mod build_config;
 pub mod config;
+pub mod ipc;
 pub mod loop_handler;
 pub mod main_handler;
 pub mod protocol;

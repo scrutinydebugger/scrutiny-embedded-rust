@@ -7,6 +7,9 @@ edition = "2021"
 
 [dependencies]
 
+[lints.clippy]
+too_many_arguments = "allow"
+
 [features]
 default = ["datalogging", "support_64bits", "protected_regions"]
 datalogging = []

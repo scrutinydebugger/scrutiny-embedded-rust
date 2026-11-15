@@ -11,16 +11,24 @@ use super::definitions::{
 /// Manages the transport layer of the Scrutiny protocol.
 ///
 /// Receives raw bytes, validates framing and CRC, and surfaces complete
-/// [`Request`]s to the caller. Serialises responses back into the byte stream.
+/// requests to the caller. Serialises responses back into the byte stream.
 /// Maintains session lifecycle including the heartbeat watchdog.
 ///
 /// Communication is half-duplex and works by polling with a request/response scheme.
 ///
+/// Buffer ownership stays with the caller. Every method that reads or writes
+/// payload bytes takes explicit `rx_buf`/`tx_buf` slice parameters rather than
+/// storing references internally, so the caller can hold zero-copy references
+/// into those buffers without conflicting borrows.
+///
 /// Methods that need to read the current time take `tb: &Timebase` explicitly
 /// so the caller keeps sole ownership of the timebase.
-pub struct CommHandler<'rxbuf, 'txbuf> {
-    active_request: Request<'rxbuf>,
-    active_response: Response<'txbuf>,
+pub struct CommHandler {
+    active_request: Request,
+    active_response: Response,
+
+    rx_buf_size: u16,
+    tx_buf_size: u16,
 
     // session
     session_counter: u32,
@@ -50,19 +58,22 @@ pub struct CommHandler<'rxbuf, 'txbuf> {
     nbytes_sent: u16,
 }
 
-impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
+impl CommHandler {
     /// Creates a new `CommHandler`.
     ///
     /// `session_counter_seed` offsets session IDs to avoid collisions when
     /// multiple Scrutiny devices share one channel.
     /// Self-disables if either buffer is outside the allowed size range.
-    pub fn new(rx_buffer: &'rxbuf mut [u8], tx_buffer: &'txbuf mut [u8], session_counter_seed: u32) -> Self {
-        let enabled = Self::is_valid_buffer_size(rx_buffer.len(), MINIMUM_RX_BUFFER_SIZE, MAXIMUM_RX_BUFFER_SIZE)
-            && Self::is_valid_buffer_size(tx_buffer.len(), MINIMUM_TX_BUFFER_SIZE, MAXIMUM_TX_BUFFER_SIZE);
+    #[must_use]
+    pub fn new(rx_buf: &[u8], tx_buf: &[u8], session_counter_seed: u32) -> Self {
+        let enabled = Self::is_valid_buffer_size(rx_buf.len(), MINIMUM_RX_BUFFER_SIZE, MAXIMUM_RX_BUFFER_SIZE)
+            && Self::is_valid_buffer_size(tx_buf.len(), MINIMUM_TX_BUFFER_SIZE, MAXIMUM_TX_BUFFER_SIZE);
 
         Self {
-            active_request: Request::new(rx_buffer),
-            active_response: Response::new(tx_buffer),
+            active_request: Request::new(),
+            active_response: Response::new(),
+            rx_buf_size: u16::try_from(rx_buf.len()).unwrap_or(0),
+            tx_buf_size: u16::try_from(tx_buf.len()).unwrap_or(0),
             session_counter: session_counter_seed,
             session_id: 0,
             session_active: false,
@@ -83,8 +94,8 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    /// Feeds received bytes into the RX state machine.
-    pub fn receive_data(&mut self, data: &[u8], tb: &Timebase) {
+    /// Feeds received bytes into the RX state machine, writing payload data into `rx_buf`.
+    pub fn receive_data(&mut self, data: &[u8], rx_buf: &mut [u8], tb: &Timebase) {
         if !self.enabled {
             self.rx_error = RxError::Disabled;
             return;
@@ -161,7 +172,7 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
                 }
 
                 RxFsmState::WaitForData => {
-                    let Ok(buf_len) = u16::try_from(self.active_request.buffer.len()) else {
+                    let Ok(buf_len) = u16::try_from(rx_buf.len()) else {
                         self.rx_error = RxError::Overflow;
                         self.rx_state = RxFsmState::Error;
                         break;
@@ -183,7 +194,7 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
                     let to_read_usize = to_read as usize;
 
                     let dst = self.per_state_counter as usize;
-                    self.active_request.buffer[dst..dst + to_read_usize].copy_from_slice(&data[i..i + to_read_usize]);
+                    rx_buf[dst..dst + to_read_usize].copy_from_slice(&data[i..i + to_read_usize]);
                     self.rx_crc = crc32(&data[i..i + to_read_usize], self.rx_crc);
                     self.per_state_counter += to_read;
                     i += to_read_usize;
@@ -203,7 +214,7 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
                     if self.per_state_counter >= 4 {
                         self.state = CommState::Idle;
                         if self.rx_crc == self.active_request.crc {
-                            self.process_active_request();
+                            self.process_active_request(rx_buf);
                         } else {
                             self.reset_rx(tb.get_timestamp());
                         }
@@ -222,26 +233,21 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
         self.pending_request
     }
 
-    /// Returns the pending request, or `None` if no request has been received yet.
-    #[must_use]
-    pub const fn get_request(&self) -> Option<&Request<'_>> {
-        if !self.pending_request {
-            return None;
-        }
-        Some(&self.active_request)
-    }
-
-    /// Returns simultaneous references to the pending request and the (reset) response buffer,
+    /// Returns the pending request metadata and a zero-copy slice into `rx_buf`,
     /// or `None` if no request is pending.
     ///
-    /// Use this when you need to read the request and fill the response in the same scope —
-    /// Rust allows the two borrows because they come from distinct fields.
-    pub const fn get_req_and_response(&mut self) -> Option<(&Request<'rxbuf>, &mut Response<'txbuf>)> {
+    /// The returned data slice has the lifetime of `rx_buf`, not of `self`, so the
+    /// caller can mutably borrow other `CommHandler` methods while the slice is live.
+    #[must_use]
+    pub fn get_request<'rx>(&self, rx_buf: &'rx [u8]) -> Option<(u8, u8, &'rx [u8])> {
         if !self.pending_request {
             return None;
         }
-        self.active_response.reset();
-        Some((&self.active_request, &mut self.active_response))
+        Some((
+            self.active_request.command_id,
+            self.active_request.subfunction_id,
+            &rx_buf[..self.active_request.data_length as usize],
+        ))
     }
 
     /// Clears the pending request and readies the RX path for the next frame.
@@ -249,21 +255,20 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
         self.reset_rx(tb.get_timestamp());
     }
 
-    /// Returns a mutable reference to the response object for the caller to fill.
-    /// Set [`Response::command_id`], [`Response::subfunction_id`],
-    /// [`Response::response_code`], [`Response::data_length`], and write payload
-    /// bytes via [`Response::payload`], then call [`send_response`](Self::send_response).
-    pub const fn prepare_response(&mut self) -> &mut Response<'txbuf> {
-        self.active_response.reset();
+    /// Returns a mutable reference to the response metadata.
+    pub const fn active_response_mut(&mut self) -> &mut Response {
         &mut self.active_response
     }
 
-    /// Queues the response prepared via [`prepare_response`](Self::prepare_response)
-    /// for transmission.
+    /// Serialises and queues the response for transmission.
+    ///
+    /// `tx_buf` must hold the payload bytes that were written before this call;
+    /// its first `data_length` bytes are included in the CRC and streamed by
+    /// [`pop_data`](Self::pop_data).
     ///
     /// Returns `false` (and records a `tx_error`) if the handler is disabled,
     /// busy, or `data_length` exceeds the TX buffer size.
-    pub fn send_response(&mut self) -> bool {
+    pub fn send_response(&mut self, tx_buf: &[u8]) -> bool {
         self.tx_error = TxError::None;
 
         if !self.enabled {
@@ -275,7 +280,7 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
             return false;
         }
         let data_len = self.active_response.data_length;
-        if usize::from(data_len) > self.active_response.buffer.len() {
+        if usize::from(data_len) > tx_buf.len() {
             self.reset_tx();
             self.tx_error = TxError::Overflow;
             return false;
@@ -286,7 +291,7 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
             self.active_response.subfunction_id,
             self.active_response.response_code,
             data_len,
-            &self.active_response.buffer[..data_len as usize],
+            &tx_buf[..data_len as usize],
         );
         self.active_response.crc = crc;
 
@@ -297,10 +302,12 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
         true
     }
 
-    /// Copies up to `out.len()` pending TX bytes into `out`.  Returns the number
-    /// of bytes written.  When all bytes have been popped the handler transitions
+    /// Copies up to `out.len()` pending TX bytes into `out`. Returns the number
+    /// of bytes written. When all bytes have been popped the handler transitions
     /// back to `Idle` automatically and readies RX for the next frame.
-    pub fn pop_data(&mut self, out: &mut [u8], tb: &Timebase) -> u16 {
+    ///
+    /// `tx_buf` must be the same buffer that was passed to [`send_response`](Self::send_response).
+    pub fn pop_data(&mut self, out: &mut [u8], tx_buf: &[u8], tb: &Timebase) -> u16 {
         if self.state != CommState::Transmitting {
             return 0;
         }
@@ -332,8 +339,7 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
                 let can_copy = (to_copy - i).min(remaining_data);
                 let src = data_sent as usize;
                 let dst = i as usize;
-                let payload = &self.active_response.buffer[src..src + can_copy as usize];
-                out[dst..dst + can_copy as usize].copy_from_slice(payload);
+                out[dst..dst + can_copy as usize].copy_from_slice(&tx_buf[src..src + can_copy as usize]);
                 i += can_copy;
                 self.nbytes_sent += can_copy;
             }
@@ -467,14 +473,14 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
 
     /// Size of the RX buffer in bytes.
     #[must_use]
-    pub fn rx_buffer_size(&self) -> u16 {
-        u16::try_from(self.active_request.buffer.len()).unwrap_or(0)
+    pub const fn rx_buffer_size(&self) -> u16 {
+        self.rx_buf_size
     }
 
     /// Size of the TX buffer in bytes.
     #[must_use]
-    pub fn tx_buffer_size(&self) -> u16 {
-        u16::try_from(self.active_response.buffer.len()).unwrap_or(0)
+    pub const fn tx_buffer_size(&self) -> u16 {
+        self.tx_buf_size
     }
 
     /// Resets all state including the session.
@@ -516,11 +522,11 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    fn process_active_request(&mut self) {
+    fn process_active_request(&mut self, rx_buf: &[u8]) {
         let must_process = if self.session_active {
             true
         } else {
-            self.is_discover_request() || self.is_connect_request()
+            self.is_discover_request(rx_buf) || self.is_connect_request()
         };
 
         if must_process {
@@ -531,7 +537,7 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    fn is_discover_request(&self) -> bool {
+    fn is_discover_request(&self, rx_buf: &[u8]) -> bool {
         if self.active_request.command_id != CommandId::CommControl as u8 {
             return false;
         }
@@ -541,7 +547,7 @@ impl<'rxbuf, 'txbuf> CommHandler<'rxbuf, 'txbuf> {
         if (self.active_request.data_length as usize) < DISCOVER_MAGIC.len() {
             return false;
         }
-        self.active_request.buffer[..DISCOVER_MAGIC.len()] == DISCOVER_MAGIC
+        rx_buf[..DISCOVER_MAGIC.len()] == DISCOVER_MAGIC
     }
 
     const fn is_connect_request(&self) -> bool {

@@ -1,6 +1,9 @@
 /// Magic bytes that must be present in a `CommControl/Discover` request payload.
 pub const DISCOVER_MAGIC: [u8; 4] = [0x7E, 0x18, 0xFC, 0x68];
 
+/// Magic bytes sent in every `CommControl/Connect` request and echoed in the response.
+pub const CONNECT_MAGIC: [u8; 4] = [0x82, 0x90, 0x22, 0x66];
+
 pub const MINIMUM_RX_BUFFER_SIZE: u16 = 32;
 pub const MINIMUM_TX_BUFFER_SIZE: u16 = 32;
 /// Leave a 16-byte margin so overflow detection works with 16-bit counters.
@@ -12,31 +15,18 @@ pub const RX_TIMEOUT_100NS: u32 = crate::build_config::COMM_RX_TIMEOUT_US * 10;
 /// Session heartbeat deadline, in 100 ns units.
 pub const HEARTBEAT_TIMEOUT_100NS: u32 = crate::build_config::COMM_HEARTBEAT_TIMEOUT_US * 10;
 
-/// A fully-received and CRC-validated request from the server.
-/// Owns the RX buffer; valid until [`CommHandler::wait_next_request`] is called.
-pub struct Request<'buf> {
+/// Metadata for a fully-received and CRC-validated request from the server.
+/// The raw payload bytes live in the caller-owned RX buffer.
+pub struct Request {
     pub command_id: u8,
     pub subfunction_id: u8,
     pub(super) data_length: u16,
     pub(super) crc: u32,
-    pub(super) buffer: &'buf mut [u8],
 }
 
-impl<'buf> Request<'buf> {
-    pub(super) const fn new(buffer: &'buf mut [u8]) -> Self {
-        Self {
-            command_id: 0,
-            subfunction_id: 0,
-            data_length: 0,
-            crc: 0,
-            buffer,
-        }
-    }
-
-    /// Returns the received payload bytes.
-    #[must_use]
-    pub fn data(&self) -> &[u8] {
-        &self.buffer[..self.data_length as usize]
+impl Request {
+    pub(super) const fn new() -> Self {
+        Self { command_id: 0, subfunction_id: 0, data_length: 0, crc: 0 }
     }
 
     pub(super) const fn reset(&mut self) {
@@ -47,32 +37,19 @@ impl<'buf> Request<'buf> {
     }
 }
 
-/// A response to be sent back to the server.
-/// Owns the TX buffer; fill fields and call [`CommHandler::send_response`].
-pub struct Response<'buf> {
+/// Metadata for a response to be sent back to the server.
+/// The payload bytes live in the caller-owned TX buffer.
+pub struct Response {
     pub command_id: u8,
     pub subfunction_id: u8,
     pub response_code: u8,
     pub data_length: u16,
     pub(super) crc: u32,
-    pub(super) buffer: &'buf mut [u8],
 }
 
-impl<'buf> Response<'buf> {
-    pub(super) const fn new(buffer: &'buf mut [u8]) -> Self {
-        Self {
-            command_id: 0,
-            subfunction_id: 0,
-            response_code: 0,
-            data_length: 0,
-            crc: 0,
-            buffer,
-        }
-    }
-
-    /// Returns the full TX buffer for writing response payload bytes.
-    pub const fn payload(&mut self) -> &mut [u8] {
-        self.buffer
+impl Response {
+    pub(super) const fn new() -> Self {
+        Self { command_id: 0, subfunction_id: 0, response_code: 0, data_length: 0, crc: 0 }
     }
 
     pub(super) const fn reset(&mut self) {

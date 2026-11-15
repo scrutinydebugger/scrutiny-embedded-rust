@@ -48,6 +48,5 @@ cargo clippy --all-features -- -D warnings
 - Port enums as Rust enums, not integer constants.
 - Port C++ callback pointers as function pointers (`fn(...) -> ...`), not closures.
 - All public types and functions must have a one-line doc comment.
-- Unit tests go inline at the bottom of each module file (`#[cfg(test)]`).
 - Edits needs to pass linting test
 - No borrow checker workaround to be used unless direct memory access is required as per the design of this project or a memory optimization is required. Otherwise, if a C++ approach cannot eb ported, propose an idiomatic Rust alternative approach to the user for review.

@@ -1,3 +1,4 @@
+use crate::loop_handler::LoopHandler;
 use crate::types::{AnyType, RuntimePublishedValue};
 
 #[cfg(feature = "protected_regions")]
@@ -34,6 +35,8 @@ pub struct Config<'rxbuf, 'txbuf> {
     rpv_read_callback: Option<RpvReadCallback>,
     rpv_write_callback: Option<RpvWriteCallback>,
 
+    loops: Option<&'static [LoopHandler]>,
+
     user_command_callback: Option<UserCommandCallback>,
 
     /// Maximum bitrate in bits/sec, enforced by the server.
@@ -60,6 +63,7 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
             rpvs: None,
             rpv_read_callback: None,
             rpv_write_callback: None,
+            loops: None,
             user_command_callback: None,
             max_bitrate: 0,
             session_counter_seed: 0,
@@ -80,6 +84,7 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
         self.rpvs = None;
         self.rpv_read_callback = None;
         self.rpv_write_callback = None;
+        self.loops = None;
         self.user_command_callback = None;
         self.max_bitrate = 0;
         self.session_counter_seed = 0;
@@ -184,6 +189,23 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
     #[must_use]
     pub fn get_rpv_count(&self) -> u16 {
         self.rpvs.map_or(0, |s| u16::try_from(s.len()).unwrap_or(u16::MAX))
+    }
+
+    /// Registers the loop handlers that the server can query via `GetInfo/GetLoopDefinition`.
+    pub const fn set_loops(&mut self, loops: &'static [LoopHandler]) {
+        self.loops = Some(loops);
+    }
+
+    /// Returns the loop handler slice, or `None` if unset.
+    #[must_use]
+    pub const fn get_loops(&self) -> Option<&'static [LoopHandler]> {
+        self.loops
+    }
+
+    /// Returns the number of configured loops (saturates at 255).
+    #[must_use]
+    pub fn get_loop_count(&self) -> u8 {
+        self.loops.map_or(0, |s| u8::try_from(s.len()).unwrap_or(u8::MAX))
     }
 
     /// Returns the RPV read callback, or `None` if unset.

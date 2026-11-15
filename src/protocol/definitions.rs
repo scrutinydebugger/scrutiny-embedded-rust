@@ -153,6 +153,43 @@ pub enum GetInfoSubfn {
     GetLoopDefinition = 9,
 }
 
+impl TryFrom<u8> for GetInfoSubfn {
+    type Error = ();
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            x if x == Self::GetProtocolVersion as u8 => Ok(Self::GetProtocolVersion),
+            x if x == Self::GetSoftwareId as u8 => Ok(Self::GetSoftwareId),
+            x if x == Self::GetSupportedFeatures as u8 => Ok(Self::GetSupportedFeatures),
+            x if x == Self::GetSpecialMemoryRegionCount as u8 => Ok(Self::GetSpecialMemoryRegionCount),
+            x if x == Self::GetSpecialMemoryLocation as u8 => Ok(Self::GetSpecialMemoryLocation),
+            x if x == Self::GetRuntimePublishedValuesCount as u8 => Ok(Self::GetRuntimePublishedValuesCount),
+            x if x == Self::GetRuntimePublishedValuesDefinition as u8 => Ok(Self::GetRuntimePublishedValuesDefinition),
+            x if x == Self::GetLoopCount as u8 => Ok(Self::GetLoopCount),
+            x if x == Self::GetLoopDefinition as u8 => Ok(Self::GetLoopDefinition),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Memory region type used in `GetInfo/GetSpecialMemoryLocation` requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MemoryRegionType {
+    ReadOnly = 0,
+    Forbidden = 1,
+}
+
+impl TryFrom<u8> for MemoryRegionType {
+    type Error = ();
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            0 => Ok(Self::ReadOnly),
+            1 => Ok(Self::Forbidden),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MemoryControlSubfn {

@@ -1,10 +1,81 @@
 use crate::build_config::{PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR};
+use crate::config::{RpvReadCallback, RpvWriteCallback};
 use crate::loop_handler::{LoopHandler, LoopType};
 use crate::software_id::SOFTWARE_ID;
 use crate::tools::TypeSize;
-use crate::types::{RuntimePublishedValue, VariableType};
+use crate::types::{AnyType, RuntimePublishedValue, VariableType};
 
-use super::definitions::{ResponseCode, CONNECT_MAGIC, DISCOVER_MAGIC};
+#[cfg(feature = "protected_regions")]
+use crate::types::AddressRange;
+
+use super::definitions::{ResponseCode, CONNECT_MAGIC, DISCOVER_MAGIC, MAXIMUM_TX_BUFFER_SIZE};
+
+/// Byte size of a native pointer as transmitted in the protocol.
+const ADDR_SIZE: usize = core::mem::size_of::<*const u8>();
+
+/// Reads a big-endian encoded address from `buf[..ADDR_SIZE]` and returns it as a `usize`.
+fn read_be_addr(buf: &[u8]) -> usize {
+    let mut addr = 0usize;
+    for &b in &buf[..ADDR_SIZE] {
+        addr = (addr << 8) | usize::from(b);
+    }
+    addr
+}
+
+/// Writes `addr` as a big-endian encoded address into `buf[..ADDR_SIZE]`.
+fn write_be_addr(addr: usize, buf: &mut [u8]) {
+    for i in 0..ADDR_SIZE {
+        buf[ADDR_SIZE - 1 - i] = (addr >> (8 * i)) as u8;
+    }
+}
+
+/// Encodes `val` big-endian into `buf[..type_size]`. Silently does nothing for unsupported sizes.
+fn encode_anytype_be(val: AnyType, type_size: u8, buf: &mut [u8]) {
+    match type_size {
+        1 => buf[0] = unsafe { val.uint8 },
+        2 => buf[0..2].copy_from_slice(&unsafe { val.uint16 }.to_be_bytes()),
+        4 => buf[0..4].copy_from_slice(&unsafe { val.uint32 }.to_be_bytes()),
+        #[cfg(feature = "support_64bits")]
+        8 => buf[0..8].copy_from_slice(&unsafe { val.uint64 }.to_be_bytes()),
+        _ => {}
+    }
+}
+
+/// Decodes `type_size` big-endian bytes from `buf` into an `AnyType`.
+fn decode_anytype_be(buf: &[u8], type_size: u8) -> AnyType {
+    let mut v = AnyType { uint8: 0 };
+    match type_size {
+        1 => v.uint8 = buf[0],
+        2 => v.uint16 = u16::from_be_bytes([buf[0], buf[1]]),
+        4 => v.uint32 = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]),
+        #[cfg(feature = "support_64bits")]
+        8 => v.uint64 = u64::from_be_bytes([buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]]),
+        _ => {}
+    }
+    v
+}
+
+/// Returns the first `RuntimePublishedValue` in `rpvs` whose `id` matches, or `None`.
+fn find_rpv(id: u16, rpvs: &'static [RuntimePublishedValue]) -> Option<RuntimePublishedValue> {
+    rpvs.iter().find(|r| r.id == id).copied()
+}
+
+/// Returns `true` if the byte range `[addr, addr + len)` overlaps any entry in `ranges`.
+#[cfg(feature = "protected_regions")]
+fn region_overlaps(addr: usize, len: usize, ranges: &[AddressRange]) -> bool {
+    if len == 0 {
+        return false;
+    }
+    let block_end = addr.saturating_add(len - 1);
+    for range in ranges {
+        let range_start = range.start as usize;
+        let range_end = range.end as usize;
+        if addr <= range_end && range_start <= block_end {
+            return true;
+        }
+    }
+    false
+}
 
 const MAX_DISPLAY_NAME_LENGTH: u8 = 64;
 const MAX_LOOP_NAME_LENGTH: u8 = 32;
@@ -311,4 +382,383 @@ pub fn encode_response_get_info_loop_definition(
 #[must_use]
 pub fn protocol_type_size(vt: VariableType) -> u8 {
     if vt == VariableType::Boolean { 1 } else { vt.type_size() }
+}
+
+// ===== MemoryControl encoders =====
+
+/// Encodes a `MemoryControl/Read` response.
+///
+/// Request `data` is a sequence of `[address(ADDR_SIZE) + length(2)]` blocks.
+/// For each block the matching bytes are copied from memory into the response.
+///
+/// # Errors
+/// - `InvalidRequest` if `data` is not a non-empty multiple of `ADDR_SIZE + 2`.
+/// - `Overflow` if the encoded response would exceed `tx_buf`.
+/// - `Forbidden` if any block touches a forbidden address range (requires `protected_regions` feature).
+///
+/// # Safety
+/// Reads from the raw addresses encoded in `data`. The caller guarantees those
+/// addresses are valid for reading for the requested byte count.
+pub unsafe fn encode_response_memory_control_read(
+    data: &[u8],
+    tx_buf: &mut [u8],
+    #[cfg(feature = "protected_regions")] forbidden: Option<&'static [AddressRange]>,
+) -> Result<u16, ResponseCode> {
+    let block_header = ADDR_SIZE + 2;
+
+    if data.is_empty() || data.len() % block_header != 0 {
+        return Err(ResponseCode::InvalidRequest);
+    }
+
+    // First pass: validate and compute required TX size.
+    // Two-level check mirrors C++:
+    //   - Exceeding the protocol maximum means the client sent an impossible request → InvalidRequest.
+    //   - Fitting within the protocol max but not in this device's buffer → Overflow.
+    let protocol_max = usize::from(MAXIMUM_TX_BUFFER_SIZE);
+    let mut required_tx = 0usize;
+    let mut offset = 0;
+    while offset < data.len() {
+        let len = usize::from(u16::from_be_bytes([data[offset + ADDR_SIZE], data[offset + ADDR_SIZE + 1]]));
+        required_tx = required_tx.checked_add(block_header + len).ok_or(ResponseCode::InvalidRequest)?;
+        if required_tx > protocol_max {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        offset += block_header;
+    }
+    if required_tx > tx_buf.len() {
+        return Err(ResponseCode::Overflow);
+    }
+
+    // Second pass: check protected regions and write response.
+    let mut tx_cursor = 0usize;
+    let mut offset = 0;
+    while offset < data.len() {
+        let addr = read_be_addr(&data[offset..]);
+        let len_bytes = [data[offset + ADDR_SIZE], data[offset + ADDR_SIZE + 1]];
+        let len = usize::from(u16::from_be_bytes(len_bytes));
+
+        #[cfg(feature = "protected_regions")]
+        if let Some(ranges) = forbidden {
+            if region_overlaps(addr, len, ranges) {
+                return Err(ResponseCode::Forbidden);
+            }
+        }
+
+        write_be_addr(addr, &mut tx_buf[tx_cursor..]);
+        tx_cursor += ADDR_SIZE;
+        tx_buf[tx_cursor..tx_cursor + 2].copy_from_slice(&len_bytes);
+        tx_cursor += 2;
+        core::ptr::copy_nonoverlapping(addr as *const u8, tx_buf[tx_cursor..].as_mut_ptr(), len);
+        tx_cursor += len;
+
+        offset += block_header;
+    }
+
+    Ok(u16::try_from(tx_cursor).unwrap_or(u16::MAX))
+}
+
+/// Encodes a `MemoryControl/Write` response and applies the writes.
+///
+/// Request `data` is a sequence of `[address(ADDR_SIZE) + length(2) + data(length)]` blocks.
+/// Each block is written to the target address. The response echoes `[address + length]` per block.
+///
+/// # Errors
+/// - `Forbidden` if `memory_write_enable` is `false`, or a block touches a forbidden/readonly region.
+/// - `InvalidRequest` if `data` does not parse into a valid sequence of blocks.
+/// - `Overflow` if the echo response exceeds `tx_buf`.
+///
+/// # Safety
+/// Writes to the raw addresses encoded in `data`. The caller guarantees those
+/// addresses are valid for writing for the requested byte count.
+pub unsafe fn encode_response_memory_control_write(
+    data: &[u8],
+    tx_buf: &mut [u8],
+    memory_write_enable: bool,
+    #[cfg(feature = "protected_regions")] forbidden: Option<&'static [AddressRange]>,
+    #[cfg(feature = "protected_regions")] readonly: Option<&'static [AddressRange]>,
+) -> Result<u16, ResponseCode> {
+    if !memory_write_enable {
+        return Err(ResponseCode::Forbidden);
+    }
+
+    let block_header = ADDR_SIZE + 2;
+
+    if data.is_empty() {
+        return Err(ResponseCode::InvalidRequest);
+    }
+
+    // First pass: validate structure, count blocks, compute required TX.
+    let mut offset = 0usize;
+    let mut required_tx = 0usize;
+    while offset < data.len() {
+        if offset + block_header > data.len() {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        let len = usize::from(u16::from_be_bytes([data[offset + ADDR_SIZE], data[offset + ADDR_SIZE + 1]]));
+        let block_size = block_header + len;
+        if offset + block_size > data.len() {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        offset += block_size;
+        required_tx = required_tx.checked_add(block_header).ok_or(ResponseCode::Overflow)?;
+    }
+    if offset != data.len() {
+        return Err(ResponseCode::InvalidRequest);
+    }
+    if required_tx > tx_buf.len() {
+        return Err(ResponseCode::Overflow);
+    }
+
+    // Second pass: check protected regions, perform writes, encode response.
+    let mut offset = 0usize;
+    let mut tx_cursor = 0usize;
+    while offset < data.len() {
+        let addr = read_be_addr(&data[offset..]);
+        let len_bytes = [data[offset + ADDR_SIZE], data[offset + ADDR_SIZE + 1]];
+        let len = usize::from(u16::from_be_bytes(len_bytes));
+        let data_start = offset + block_header;
+
+        #[cfg(feature = "protected_regions")]
+        {
+            if let Some(ranges) = forbidden {
+                if region_overlaps(addr, len, ranges) {
+                    return Err(ResponseCode::Forbidden);
+                }
+            }
+            if let Some(ranges) = readonly {
+                if region_overlaps(addr, len, ranges) {
+                    return Err(ResponseCode::Forbidden);
+                }
+            }
+        }
+
+        core::ptr::copy_nonoverlapping(data[data_start..].as_ptr(), addr as *mut u8, len);
+
+        write_be_addr(addr, &mut tx_buf[tx_cursor..]);
+        tx_cursor += ADDR_SIZE;
+        tx_buf[tx_cursor..tx_cursor + 2].copy_from_slice(&len_bytes);
+        tx_cursor += 2;
+
+        offset += block_header + len;
+    }
+
+    Ok(u16::try_from(tx_cursor).unwrap_or(u16::MAX))
+}
+
+/// Encodes a `MemoryControl/WriteMasked` response and applies masked writes.
+///
+/// Request `data` is `[address(ADDR_SIZE) + length(2) + data(length) + mask(length)]` per block.
+/// Each destination byte is updated as: `dst = (dst & !mask) | (src & mask)`.
+///
+/// # Errors
+/// Same as `encode_response_memory_control_write`.
+///
+/// # Safety
+/// Same as `encode_response_memory_control_write`.
+pub unsafe fn encode_response_memory_control_write_masked(
+    data: &[u8],
+    tx_buf: &mut [u8],
+    memory_write_enable: bool,
+    #[cfg(feature = "protected_regions")] forbidden: Option<&'static [AddressRange]>,
+    #[cfg(feature = "protected_regions")] readonly: Option<&'static [AddressRange]>,
+) -> Result<u16, ResponseCode> {
+    if !memory_write_enable {
+        return Err(ResponseCode::Forbidden);
+    }
+
+    let block_header = ADDR_SIZE + 2;
+
+    if data.is_empty() {
+        return Err(ResponseCode::InvalidRequest);
+    }
+
+    // First pass: validate structure and compute required TX.
+    let mut offset = 0usize;
+    let mut required_tx = 0usize;
+    while offset < data.len() {
+        if offset + block_header > data.len() {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        let len = usize::from(u16::from_be_bytes([data[offset + ADDR_SIZE], data[offset + ADDR_SIZE + 1]]));
+        let block_size = block_header + len * 2; // data + mask
+        if offset + block_size > data.len() {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        offset += block_size;
+        required_tx = required_tx.checked_add(block_header).ok_or(ResponseCode::Overflow)?;
+    }
+    if offset != data.len() {
+        return Err(ResponseCode::InvalidRequest);
+    }
+    if required_tx > tx_buf.len() {
+        return Err(ResponseCode::Overflow);
+    }
+
+    // Second pass: check protected regions, perform masked writes, encode response.
+    let mut offset = 0usize;
+    let mut tx_cursor = 0usize;
+    while offset < data.len() {
+        let addr = read_be_addr(&data[offset..]);
+        let len_bytes = [data[offset + ADDR_SIZE], data[offset + ADDR_SIZE + 1]];
+        let len = usize::from(u16::from_be_bytes(len_bytes));
+        let src = &data[offset + block_header..offset + block_header + len];
+        let mask = &data[offset + block_header + len..offset + block_header + len * 2];
+
+        #[cfg(feature = "protected_regions")]
+        {
+            if let Some(ranges) = forbidden {
+                if region_overlaps(addr, len, ranges) {
+                    return Err(ResponseCode::Forbidden);
+                }
+            }
+            if let Some(ranges) = readonly {
+                if region_overlaps(addr, len, ranges) {
+                    return Err(ResponseCode::Forbidden);
+                }
+            }
+        }
+
+        let dst = addr as *mut u8;
+        for i in 0..len {
+            let cur = dst.add(i).read();
+            dst.add(i).write((cur & !mask[i]) | (src[i] & mask[i]));
+        }
+
+        write_be_addr(addr, &mut tx_buf[tx_cursor..]);
+        tx_cursor += ADDR_SIZE;
+        tx_buf[tx_cursor..tx_cursor + 2].copy_from_slice(&len_bytes);
+        tx_cursor += 2;
+
+        offset += block_header + len * 2;
+    }
+
+    Ok(u16::try_from(tx_cursor).unwrap_or(u16::MAX))
+}
+
+/// Encodes a `MemoryControl/ReadRpv` response.
+///
+/// Request `data` is a sequence of 2-byte RPV IDs. For each ID the read callback is called
+/// and the value is written as `id(2) + value(type_size)` in the response.
+///
+/// # Errors
+/// - `UnsupportedFeature` if no RPVs or no read callback is configured.
+/// - `InvalidRequest` if `data` length is odd or an RPV ID is not found.
+/// - `FailureToProceed` if the read callback returns `false`.
+/// - `Overflow` if the response exceeds `tx_buf`.
+pub fn encode_response_memory_control_read_rpv(
+    data: &[u8],
+    rpvs: Option<&'static [RuntimePublishedValue]>,
+    read_cb: Option<RpvReadCallback>,
+    tx_buf: &mut [u8],
+) -> Result<u16, ResponseCode> {
+    let Some(rpvs) = rpvs else {
+        return Err(ResponseCode::UnsupportedFeature);
+    };
+    let Some(read_cb) = read_cb else {
+        return Err(ResponseCode::UnsupportedFeature);
+    };
+
+    if data.len() % 2 != 0 {
+        return Err(ResponseCode::InvalidRequest);
+    }
+
+    let mut tx_cursor = 0usize;
+    let mut offset = 0usize;
+    while offset < data.len() {
+        let id = u16::from_be_bytes([data[offset], data[offset + 1]]);
+        offset += 2;
+
+        let Some(rpv) = find_rpv(id, rpvs) else {
+            return Err(ResponseCode::FailureToProceed);
+        };
+
+        let type_size = protocol_type_size(rpv.var_type);
+        if type_size == 0 {
+            return Err(ResponseCode::FailureToProceed);
+        }
+
+        if tx_cursor + 2 + usize::from(type_size) > tx_buf.len() {
+            return Err(ResponseCode::Overflow);
+        }
+
+        let mut val = AnyType { uint8: 0 };
+        if !read_cb(rpv, &mut val) {
+            return Err(ResponseCode::FailureToProceed);
+        }
+
+        tx_buf[tx_cursor..tx_cursor + 2].copy_from_slice(&id.to_be_bytes());
+        tx_cursor += 2;
+        encode_anytype_be(val, type_size, &mut tx_buf[tx_cursor..]);
+        tx_cursor += usize::from(type_size);
+    }
+
+    Ok(u16::try_from(tx_cursor).unwrap_or(u16::MAX))
+}
+
+/// Encodes a `MemoryControl/WriteRpv` response and calls the write callback for each RPV.
+///
+/// Request `data` is a sequence of `id(2) + value(type_size)` entries.
+/// The response echoes `id(2) + type_size(1)` per entry.
+///
+/// # Errors
+/// - `UnsupportedFeature` if no RPVs or no write callback is configured.
+/// - `InvalidRequest` if the data does not parse into valid entries.
+/// - `FailureToProceed` if an RPV ID is not found or the write callback returns `false`.
+/// - `Overflow` if the response exceeds `tx_buf`.
+pub fn encode_response_memory_control_write_rpv(
+    data: &[u8],
+    rpvs: Option<&'static [RuntimePublishedValue]>,
+    write_cb: Option<RpvWriteCallback>,
+    tx_buf: &mut [u8],
+) -> Result<u16, ResponseCode> {
+    let Some(rpvs) = rpvs else {
+        return Err(ResponseCode::UnsupportedFeature);
+    };
+    let Some(write_cb) = write_cb else {
+        return Err(ResponseCode::UnsupportedFeature);
+    };
+
+    if data.is_empty() {
+        return Err(ResponseCode::InvalidRequest);
+    }
+
+    let mut tx_cursor = 0usize;
+    let mut offset = 0usize;
+    while offset < data.len() {
+        if offset + 2 > data.len() {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        let id = u16::from_be_bytes([data[offset], data[offset + 1]]);
+        offset += 2;
+
+        let Some(rpv) = find_rpv(id, rpvs) else {
+            // Can't determine how many bytes follow — parsing is impossible.
+            return Err(ResponseCode::InvalidRequest);
+        };
+
+        let type_size = protocol_type_size(rpv.var_type);
+        if type_size == 0 {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        if offset + usize::from(type_size) > data.len() {
+            return Err(ResponseCode::InvalidRequest);
+        }
+
+        let val = decode_anytype_be(&data[offset..], type_size);
+        offset += usize::from(type_size);
+
+        if tx_cursor + 3 > tx_buf.len() {
+            return Err(ResponseCode::Overflow);
+        }
+
+        if !write_cb(rpv, &val) {
+            return Err(ResponseCode::FailureToProceed);
+        }
+
+        tx_buf[tx_cursor..tx_cursor + 2].copy_from_slice(&id.to_be_bytes());
+        tx_buf[tx_cursor + 2] = type_size;
+        tx_cursor += 3;
+    }
+
+    Ok(u16::try_from(tx_cursor).unwrap_or(u16::MAX))
 }

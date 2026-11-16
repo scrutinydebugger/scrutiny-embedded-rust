@@ -89,6 +89,7 @@ cfg_select! {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct RuntimePublishedValue {
     pub id: u16,
     pub var_type: VariableType,

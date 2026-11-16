@@ -200,6 +200,20 @@ pub enum MemoryControlSubfn {
     WriteRpv = 5,
 }
 
+impl TryFrom<u8> for MemoryControlSubfn {
+    type Error = ();
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            x if x == Self::Read as u8 => Ok(Self::Read),
+            x if x == Self::Write as u8 => Ok(Self::Write),
+            x if x == Self::WriteMasked as u8 => Ok(Self::WriteMasked),
+            x if x == Self::ReadRpv as u8 => Ok(Self::ReadRpv),
+            x if x == Self::WriteRpv as u8 => Ok(Self::WriteRpv),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DataLogControlSubfn {

@@ -1,10 +1,12 @@
 use crate::build_config;
-use crate::config::Config;
+use crate::config::{Config, RpvReadCallback, RpvWriteCallback};
 use crate::loop_handler::LoopHandler;
 use crate::protocol::codec_v1_0;
 use crate::protocol::definitions::{
-    CommControlSubfn, CommandId, GetInfoSubfn, MemoryRegionType, ResponseCode, CONNECT_MAGIC,
+    CommControlSubfn, CommandId, GetInfoSubfn, MemoryControlSubfn, ResponseCode, CONNECT_MAGIC,
 };
+#[cfg(feature = "protected_regions")]
+use crate::protocol::definitions::MemoryRegionType;
 use crate::protocol::CommHandler;
 use crate::timebase::Timebase;
 use crate::types::{RuntimePublishedValue, Timediff, Timestamp};
@@ -26,6 +28,8 @@ pub struct MainHandler<'rxbuf, 'txbuf> {
     memory_write_enable: bool,
     user_command_configured: bool,
     rpvs: Option<&'static [RuntimePublishedValue]>,
+    rpv_read_callback: Option<RpvReadCallback>,
+    rpv_write_callback: Option<RpvWriteCallback>,
     loops: Option<&'static [LoopHandler]>,
     #[cfg(feature = "protected_regions")]
     forbidden_ranges: Option<&'static [AddressRange]>,
@@ -47,6 +51,8 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         let memory_write_enable = config.memory_write_enable;
         let user_command_configured = config.get_user_command_callback().is_some();
         let rpvs = config.get_rpvs_array();
+        let rpv_read_callback = config.get_rpv_read_callback();
+        let rpv_write_callback = config.get_rpv_write_callback();
         let loops = config.get_loops();
         #[cfg(feature = "protected_regions")]
         let forbidden_ranges = config.forbidden_ranges();
@@ -69,6 +75,8 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             memory_write_enable,
             user_command_configured,
             rpvs,
+            rpv_read_callback,
+            rpv_write_callback,
             loops,
             #[cfg(feature = "protected_regions")]
             forbidden_ranges,
@@ -226,7 +234,21 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 subfn_id,
                 data,
             ),
-            Ok(CommandId::MemoryControl | CommandId::UserCommand | CommandId::DataLogControl) | Err(()) => {
+            Ok(CommandId::MemoryControl) => Self::process_memory_control(
+                &mut self.comm,
+                &mut *self.tx_buf,
+                self.memory_write_enable,
+                self.rpvs,
+                self.rpv_read_callback,
+                self.rpv_write_callback,
+                #[cfg(feature = "protected_regions")]
+                self.forbidden_ranges,
+                #[cfg(feature = "protected_regions")]
+                self.readonly_ranges,
+                subfn_id,
+                data,
+            ),
+            Ok(CommandId::UserCommand | CommandId::DataLogControl) | Err(()) => {
                 ResponseCode::UnsupportedFeature
             }
         }
@@ -548,6 +570,109 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                     *disconnect_pending = true;
                 }
                 ResponseCode::Ok
+            }
+
+            Err(()) => ResponseCode::UnsupportedFeature,
+        }
+    }
+
+    // ===== MemoryControl =====
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_memory_control(
+        comm: &mut CommHandler,
+        tx_buf: &mut [u8],
+        memory_write_enable: bool,
+        rpvs: Option<&'static [RuntimePublishedValue]>,
+        rpv_read_callback: Option<RpvReadCallback>,
+        rpv_write_callback: Option<RpvWriteCallback>,
+        #[cfg(feature = "protected_regions")] forbidden_ranges: Option<&'static [crate::types::AddressRange]>,
+        #[cfg(feature = "protected_regions")] readonly_ranges: Option<&'static [crate::types::AddressRange]>,
+        subfn_id: u8,
+        data: &[u8],
+    ) -> ResponseCode {
+        match MemoryControlSubfn::try_from(subfn_id) {
+            Ok(MemoryControlSubfn::Read) => {
+                // Safety: reading arbitrary memory is the protocol's intended purpose.
+                let result = unsafe {
+                    codec_v1_0::encode_response_memory_control_read(
+                        data,
+                        tx_buf,
+                        #[cfg(feature = "protected_regions")]
+                        forbidden_ranges,
+                    )
+                };
+                match result {
+                    Ok(len) => {
+                        comm.active_response_mut().data_length = len;
+                        ResponseCode::Ok
+                    }
+                    Err(code) => code,
+                }
+            }
+
+            Ok(MemoryControlSubfn::Write) => {
+                // Safety: writing arbitrary memory is the protocol's intended purpose.
+                let result = unsafe {
+                    codec_v1_0::encode_response_memory_control_write(
+                        data,
+                        tx_buf,
+                        memory_write_enable,
+                        #[cfg(feature = "protected_regions")]
+                        forbidden_ranges,
+                        #[cfg(feature = "protected_regions")]
+                        readonly_ranges,
+                    )
+                };
+                match result {
+                    Ok(len) => {
+                        comm.active_response_mut().data_length = len;
+                        ResponseCode::Ok
+                    }
+                    Err(code) => code,
+                }
+            }
+
+            Ok(MemoryControlSubfn::WriteMasked) => {
+                // Safety: writing arbitrary memory is the protocol's intended purpose.
+                let result = unsafe {
+                    codec_v1_0::encode_response_memory_control_write_masked(
+                        data,
+                        tx_buf,
+                        memory_write_enable,
+                        #[cfg(feature = "protected_regions")]
+                        forbidden_ranges,
+                        #[cfg(feature = "protected_regions")]
+                        readonly_ranges,
+                    )
+                };
+                match result {
+                    Ok(len) => {
+                        comm.active_response_mut().data_length = len;
+                        ResponseCode::Ok
+                    }
+                    Err(code) => code,
+                }
+            }
+
+            Ok(MemoryControlSubfn::ReadRpv) => {
+                match codec_v1_0::encode_response_memory_control_read_rpv(data, rpvs, rpv_read_callback, tx_buf) {
+                    Ok(len) => {
+                        comm.active_response_mut().data_length = len;
+                        ResponseCode::Ok
+                    }
+                    Err(code) => code,
+                }
+            }
+
+            Ok(MemoryControlSubfn::WriteRpv) => {
+                match codec_v1_0::encode_response_memory_control_write_rpv(data, rpvs, rpv_write_callback, tx_buf) {
+                    Ok(len) => {
+                        comm.active_response_mut().data_length = len;
+                        ResponseCode::Ok
+                    }
+                    Err(code) => code,
+                }
             }
 
             Err(()) => ResponseCode::UnsupportedFeature,

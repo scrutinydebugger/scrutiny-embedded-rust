@@ -109,39 +109,8 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             // Reset so dispatch always starts from a clean response; prevents stale
             // data_length from a previous ProcessAgain cycle leaking into the response.
             self.comm.active_response_mut().reset();
-            let data = &self.rx_buf[..data_len_usize];
 
-            // Extract Copy/&'static fields before splitting the borrow.
-            let display_name = self.display_name;
-            let max_bitrate = self.max_bitrate;
-            let memory_write_enable = self.memory_write_enable;
-            let user_command_configured = self.user_command_configured;
-            let rpvs = self.rpvs;
-            let loops = self.loops;
-            #[cfg(feature = "protected_regions")]
-            let forbidden_ranges = self.forbidden_ranges;
-            #[cfg(feature = "protected_regions")]
-            let readonly_ranges = self.readonly_ranges;
-
-            let code = Self::dispatch(
-                &mut self.comm,
-                &mut *self.tx_buf,
-                display_name,
-                max_bitrate,
-                &self.timebase,
-                &mut self.disconnect_pending,
-                memory_write_enable,
-                user_command_configured,
-                rpvs,
-                loops,
-                #[cfg(feature = "protected_regions")]
-                forbidden_ranges,
-                #[cfg(feature = "protected_regions")]
-                readonly_ranges,
-                cmd_id,
-                subfn_id,
-                data,
-            );
+            let code = self.dispatch(cmd_id, subfn_id, data_len_usize);
 
             if code == ResponseCode::ProcessAgain {
                 if !self.process_again_timestamp_taken {
@@ -230,46 +199,30 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn dispatch(
-        comm: &mut CommHandler,
-        tx_buf: &mut [u8],
-        display_name: &'static str,
-        max_bitrate: u32,
-        timebase: &Timebase,
-        disconnect_pending: &mut bool,
-        memory_write_enable: bool,
-        user_command_configured: bool,
-        rpvs: Option<&'static [RuntimePublishedValue]>,
-        loops: Option<&'static [LoopHandler]>,
-        #[cfg(feature = "protected_regions")] forbidden_ranges: Option<&'static [AddressRange]>,
-        #[cfg(feature = "protected_regions")] readonly_ranges: Option<&'static [AddressRange]>,
-        cmd_id: u8,
-        subfn_id: u8,
-        data: &[u8],
-    ) -> ResponseCode {
+    fn dispatch(&mut self, cmd_id: u8, subfn_id: u8, data_len: usize) -> ResponseCode {
+        let data = &self.rx_buf[..data_len];
         match CommandId::try_from(cmd_id) {
             Ok(CommandId::GetInfo) => Self::process_get_info(
-                comm,
-                tx_buf,
-                memory_write_enable,
-                user_command_configured,
-                rpvs,
-                loops,
+                &mut self.comm,
+                &mut *self.tx_buf,
+                self.memory_write_enable,
+                self.user_command_configured,
+                self.rpvs,
+                self.loops,
                 #[cfg(feature = "protected_regions")]
-                forbidden_ranges,
+                self.forbidden_ranges,
                 #[cfg(feature = "protected_regions")]
-                readonly_ranges,
+                self.readonly_ranges,
                 subfn_id,
                 data,
             ),
             Ok(CommandId::CommControl) => Self::process_comm_control(
-                comm,
-                tx_buf,
-                display_name,
-                max_bitrate,
-                timebase,
-                disconnect_pending,
+                &mut self.comm,
+                &mut *self.tx_buf,
+                self.display_name,
+                self.max_bitrate,
+                &self.timebase,
+                &mut self.disconnect_pending,
                 subfn_id,
                 data,
             ),
@@ -337,8 +290,8 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             Ok(GetInfoSubfn::GetSpecialMemoryRegionCount) => {
                 #[cfg(feature = "protected_regions")]
                 let (readonly_count, forbidden_count) = (
-                    readonly_ranges.map_or(0u8, |s| u8::try_from(s.len()).unwrap_or(u8::MAX)),
-                    forbidden_ranges.map_or(0u8, |s| u8::try_from(s.len()).unwrap_or(u8::MAX)),
+                    readonly_ranges.map_or(0u8, |arr| u8::try_from(arr.len()).unwrap_or(u8::MAX)),
+                    forbidden_ranges.map_or(0u8, |arr| u8::try_from(arr.len()).unwrap_or(u8::MAX)),
                 );
                 #[cfg(not(feature = "protected_regions"))]
                 let (readonly_count, forbidden_count) = (0u8, 0u8);

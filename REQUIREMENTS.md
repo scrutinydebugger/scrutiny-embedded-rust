@@ -100,3 +100,4 @@ Rust port of the scrutiny-embedded C++ instrumentation library.
 - Each module must have unit tests covering its behavior, compiled only under the `std` feature.
 - The protocol codec must have tests verifying encoding and decoding of each service request and response.
 - Integration tests must verify a full request/response exchange through `MainHandler` without real hardware.
+- The public API of each feature should be tests in a test suite belonging in the "tests" folders. Only internal unit tests should eb aport of a module directly.

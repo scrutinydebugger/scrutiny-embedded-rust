@@ -6,6 +6,8 @@
 
 pub mod build_config;
 pub mod config;
+#[cfg(feature = "datalogging")]
+pub mod datalogging;
 pub mod ipc;
 pub mod loop_handler;
 pub mod main_handler;

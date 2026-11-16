@@ -110,16 +110,19 @@ fn trigger_basics() {
     }
     dl.configure(&tb, 0, &host);
 
-    // Not armed — check_trigger always returns false.
-    assert!(!dl.check_trigger(&tb, &host));
+    // Not armed: condition met but process() must not trigger.
     my_var = 3.141_592_6_f32;
-    assert!(!dl.check_trigger(&tb, &host));
+    dl.process(&tb, &host);
+    assert_eq!(dl.get_state(), State::Configured);
 
     dl.arm_trigger();
     my_var = 0.0;
-    assert!(!dl.check_trigger(&tb, &host));
+    dl.process(&tb, &host);
+    assert_eq!(dl.get_state(), State::Armed); // condition not met
+
     my_var = 3.141_592_6_f32;
-    assert!(dl.check_trigger(&tb, &host));
+    dl.process(&tb, &host);
+    assert_eq!(dl.get_state(), State::Triggered); // hold_time=0 fires immediately
 }
 
 #[allow(unused_assignments)]
@@ -156,13 +159,60 @@ fn trigger_hold_time() {
     dl.configure(&tb, 0, &host);
     dl.arm_trigger();
 
-    assert!(!dl.check_trigger(&tb, &host)); // condition false
+    // Condition false: no trigger.
+    dl.process(&tb, &host);
+    assert_eq!(dl.get_state(), State::Armed);
+
+    // Condition becomes true: hold timer starts at timestamp=0.
     my_var = 3.141_592_6_f32;
-    assert!(!dl.check_trigger(&tb, &host)); // just became true, hold not elapsed
+    dl.process(&tb, &host);
+    assert_eq!(dl.get_state(), State::Armed); // hold not elapsed yet
+
     tb.step(99);
-    assert!(!dl.check_trigger(&tb, &host)); // 99 ticks < 100
+    dl.process(&tb, &host);
+    assert_eq!(dl.get_state(), State::Armed); // 99 ticks < 100
+
     tb.step(1);
-    assert!(dl.check_trigger(&tb, &host)); // 100 ticks >= 100
+    dl.process(&tb, &host);
+    assert_eq!(dl.get_state(), State::Triggered); // 100 ticks >= hold_time
+}
+
+#[test]
+fn configure_rejects_varbit_with_bitsize_zero() {
+    let host = make_host();
+    let tb = Timebase::new();
+    let dummy: u32 = 0;
+    let mut dl_buf = [0u8; 128];
+
+    let mut dl = DataLogger::new(&mut dl_buf, None);
+    {
+        let cfg = dl.config_mut();
+        *cfg = Configuration::DEFAULT;
+        cfg.items_count = 1;
+        cfg.items_to_log[0] = LoggableItem::Memory {
+            address: (&raw const dummy).cast(),
+            size: 4,
+        };
+        cfg.decimation = 1;
+        cfg.trigger = TriggerConfig {
+            condition: SupportedTriggerConditions::GreaterThan,
+            operand_count: 2,
+            operands: [
+                Operand::VarBit {
+                    addr: (&raw const dummy).cast(),
+                    datatype: VariableType::Uint32,
+                    bitoffset: 0,
+                    bitsize: 0,
+                },
+                Operand::Literal(0.0),
+                Operand::Literal(0.0),
+            ],
+            hold_time_100ns: 0,
+        };
+    }
+    dl.configure(&tb, 0, &host);
+    assert_eq!(dl.get_state(), State::Error);
+    assert!(!dl.config_valid());
 }
 
 #[allow(unused_assignments)]

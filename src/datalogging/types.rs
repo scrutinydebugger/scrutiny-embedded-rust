@@ -69,6 +69,7 @@ pub enum SupportedTriggerConditions {
     IsWithin = 8,
 }
 
+
 /// Trigger configuration, including the condition and its operands.
 #[derive(Clone, Copy)]
 pub struct TriggerConfig {

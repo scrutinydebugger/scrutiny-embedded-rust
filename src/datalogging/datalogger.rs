@@ -157,14 +157,7 @@ impl<'buf> DataLogger<'buf> {
             self.config_valid = false;
         }
 
-        // Look up the active condition and check the enum is in range.
-        let condition_index = self.config.trigger.condition as usize;
-        if condition_index >= 9 {
-            self.config_valid = false;
-        } else {
-            self.trigger.active_condition =
-                active_condition_for(self.config.trigger.condition);
-        }
+        self.trigger.active_condition = active_condition_for(self.config.trigger.condition);
 
         // Operand count must match what the condition expects.
         if self.config.trigger.operand_count != self.trigger.active_condition.operand_count {
@@ -203,7 +196,7 @@ impl<'buf> DataLogger<'buf> {
                     } => {
                         let max_bits =
                             (core::mem::size_of::<UintBiggest>() * 8) as u8;
-                        if bitoffset >= max_bits || bitsize > max_bits {
+                        if bitoffset >= max_bits || bitsize > max_bits || bitsize == 0 {
                             self.config_valid = false;
                         }
                         if !is_supported_type(datatype) {
@@ -312,7 +305,7 @@ impl<'buf> DataLogger<'buf> {
 
     /// Checks whether the trigger condition is currently satisfied (hold time included).
     /// Only meaningful when armed.
-    pub fn check_trigger(&mut self, timebase: &Timebase, host: &dyn DataloggerHost) -> bool {
+    pub(crate) fn check_trigger(&mut self, timebase: &Timebase, host: &dyn DataloggerHost) -> bool {
         if self.state != State::Armed {
             return false;
         }
@@ -505,7 +498,7 @@ impl<'buf> DataLogger<'buf> {
 
 /// Reads one operand and stores value + type in `out`.
 /// Returns `false` on failure (bad operand type, RPV not found, etc.).
-pub fn fetch_operand(
+pub fn fetch_operand(  // pub: used by integration tests
     host: &dyn DataloggerHost,
     operand: &Operand,
     out: &mut AnyValAndTypePair,
@@ -557,7 +550,7 @@ pub fn fetch_operand(
 }
 
 /// Reads a typed variable from `addr` using the host's `read_memory`.
-pub fn fetch_variable(
+pub(crate) fn fetch_variable(
     host: &dyn DataloggerHost,
     addr: *const u8,
     vartype: VariableType,
@@ -574,7 +567,7 @@ pub fn fetch_variable(
 /// Reads a bit-field from memory and stores the result in `out`.
 /// `var_tt` determines whether the bitfield is interpreted as sint, uint, or bool.
 #[allow(clippy::cast_possible_truncation)]
-pub fn fetch_variable_bitfield(
+pub(crate) fn fetch_variable_bitfield(
     host: &dyn DataloggerHost,
     addr: *const u8,
     var_tt: VariableTypeType,
@@ -743,7 +736,7 @@ pub fn convert_to_compare_type(pair: &mut AnyValAndTypePair) {
 // ── Private free helpers ──────────────────────────────────────────────────────
 
 /// Returns `true` for types the datalogger can safely read and compare.
-pub fn is_supported_type(vt: VariableType) -> bool {
+pub(crate) fn is_supported_type(vt: VariableType) -> bool {
     matches!(
         vt,
         VariableType::Boolean

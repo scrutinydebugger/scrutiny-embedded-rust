@@ -368,6 +368,3 @@ fn encode_anytype_be(val: &AnyType, var_type: VariableType, dst: &mut [u8]) -> u
     }
 }
 
-// Suppress the unused-variable warning on the fallback arm.
-#[allow(unused_variables)]
-const fn _assert_encode_anytype_be_compiles() {}

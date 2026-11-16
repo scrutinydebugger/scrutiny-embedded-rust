@@ -202,6 +202,7 @@ pub fn change_more_than_eval(data: &mut ConditionSharedData, ops: &[AnyValAndTyp
             CompareCategory::Uint => {
                 let cur = unsafe { read_uint(&ops[0]) };
                 let prev = crate::tools::read_biggest_uint(&data.cmt_previous_val);
+                // Cast: f32 → i64 (signed delta) → u64 so wrapping_add correctly subtracts when delta < 0.
                 let threshold = prev.wrapping_add(delta as crate::types::IntBiggest as crate::types::UintBiggest);
                 if delta >= 0.0 { cur > threshold } else { cur < threshold }
             }

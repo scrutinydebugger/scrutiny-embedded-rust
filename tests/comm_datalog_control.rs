@@ -1,6 +1,6 @@
 #![cfg(feature = "datalogging")]
 
-use scrutiny_embedded_rust::build_config::DATALOGGING_MAX_SIGNAL;
+use scrutiny_embedded_rust::build_config::{DATALOGGING_MAX_SIGNAL, REQUEST_MAX_PROCESS_TIME_US};
 use scrutiny_embedded_rust::config::Config;
 use scrutiny_embedded_rust::datalogging::{State as DlState, MAX_OPERANDS};
 use scrutiny_embedded_rust::loop_handler::{FixedFreqLoopHandler, LoopHandler, VariableFreqLoopHandler};
@@ -1199,4 +1199,89 @@ fn test_reset_datalogger() {
 
     // After reset: Idle
     assert_eq!(get_status_state(&mut h), DlState::Idle as u8, "should be Idle after reset");
+}
+
+// A request that keeps returning ProcessAgain (loop never releases the datalogger) is answered
+// with FailureToProceed once REQUEST_MAX_PROCESS_TIME_US has elapsed, then the handler recovers.
+#[test]
+fn test_process_again_timeout_failure_to_proceed() {
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOPS_PA_TIMEOUT: [&LoopHandler; 1] = [LOOP1.handler()];
+    static mut DL_BUF_PA_TIMEOUT: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_PA_TIMEOUT) }, &LOOPS_PA_TIMEOUT);
+    connect(&mut h);
+
+    let resp = send_configure(&mut h, &get_simple_trigger_config(0));
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    do_ownership_transfer(&mut h, &LOOP1);
+    assert!(h.datalogging_ownership_taken());
+
+    // The loop is not processed anymore, so it never releases the datalogger.
+    let timeout_100ns = REQUEST_MAX_PROCESS_TIME_US * 10;
+    let reset_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ResetDatalogger as u8, &[]);
+    h.receive_data(&reset_req);
+    h.process(0); // First ProcessAgain, timestamp taken
+    assert_eq!(h.data_to_send(), 0);
+
+    let step = timeout_100ns / 10;
+    for _ in 0..9 {
+        h.process(step);
+        assert_eq!(h.data_to_send(), 0);
+    }
+    h.process(step - 1);
+    assert_eq!(h.data_to_send(), 0, "no response expected just before the timeout");
+
+    h.process(1);
+    assert!(h.data_to_send() > 0, "response expected once the timeout is reached");
+    let resp = pop_response(&mut h);
+    h.process(0);
+    assert_eq!(resp[0], CommandId::DataLogControl as u8 | 0x80);
+    assert_eq!(resp[1], DataLogControlSubfn::ResetDatalogger as u8);
+    assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
+    assert!(resp_payload(&resp).is_empty());
+
+    // The handler accepts a new request afterward.
+    assert_eq!(get_status_state(&mut h), DlState::Configured as u8);
+}
+
+// A request returning ProcessAgain completes with OK when the loop releases the datalogger
+// before REQUEST_MAX_PROCESS_TIME_US has elapsed.
+#[test]
+fn test_process_again_completes_before_timeout() {
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOPS_PA_OK: [&LoopHandler; 1] = [LOOP1.handler()];
+    static mut DL_BUF_PA_OK: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_PA_OK) }, &LOOPS_PA_OK);
+    connect(&mut h);
+
+    let resp = send_configure(&mut h, &get_simple_trigger_config(0));
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    do_ownership_transfer(&mut h, &LOOP1);
+    assert!(h.datalogging_ownership_taken());
+
+    let timeout_100ns = REQUEST_MAX_PROCESS_TIME_US * 10;
+    let step = timeout_100ns / 10;
+    let reset_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ResetDatalogger as u8, &[]);
+    h.receive_data(&reset_req);
+    h.process(0); // First ProcessAgain, timestamp taken
+
+    let mut elapsed = 0u32;
+    while h.data_to_send() == 0 {
+        assert!(elapsed < timeout_100ns, "request did not complete before the timeout");
+        LOOP1.process_with_time(step);
+        h.process(step);
+        elapsed += step;
+    }
+    let resp = pop_response(&mut h);
+    h.process(0);
+    assert!(elapsed < timeout_100ns);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    assert!(!h.datalogging_ownership_taken());
+    assert_eq!(get_status_state(&mut h), DlState::Idle as u8);
 }

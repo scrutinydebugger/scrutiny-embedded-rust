@@ -1053,10 +1053,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(DataLogControlSubfn::GetAcquisitionMetadata) => {
-                if dl.cached_state != DlState::AcquisitionCompleted {
+                if dl.owner.is_none() || dl.cached_state != DlState::AcquisitionCompleted {
                     return ResponseCode::FailureToProceed;
                 }
-                // Safety: AcquisitionCompleted means the loop owns but is idle — safe to read.
+                // Safety: owner is Some and state is AcquisitionCompleted — loop is idle, safe to read.
                 let dl_obj = unsafe { cell.get() };
                 let acq_id = dl_obj.get_acquisition_id();
                 let config_id = dl_obj.get_config_id();

@@ -29,7 +29,7 @@ pub enum LoopType {
 /// Per-loop datalogging runtime state, accessed only from the loop task.
 struct LoopDlRuntime {
     owns:           bool,
-    data_notified:  bool,
+    data_acquired:  bool,
     /// Address of the `DataLoggerCell` received via `TakeOwnership` IPC; null when not owned.
     cell:           *const DataLoggerCell,
     rpvs:        Option<&'static [RuntimePublishedValue]>,
@@ -40,7 +40,7 @@ struct LoopDlRuntime {
 impl LoopDlRuntime {
     const DEFAULT: Self = Self {
         owns:         false,
-        data_notified: false,
+        data_acquired: false,
         cell:         ptr::null(),
         rpvs:         None,
         rpv_read_cb:  None,
@@ -209,7 +209,7 @@ impl LoopHandler {
                     Main2LoopMsg::TakeOwnership { cell_addr, rpvs, rpv_read_cb } => {
                         runtime.cell = cell_addr as *const DataLoggerCell;
                         runtime.owns = true;
-                        runtime.data_notified = false;
+                        runtime.data_acquired = false;
                         runtime.rpvs = rpvs;
                         runtime.rpv_read_cb = rpv_read_cb;
                         self.loop2main.send(Loop2MainMsg {
@@ -221,6 +221,7 @@ impl LoopHandler {
                         if runtime.owns && !runtime.cell.is_null() {
                             // SAFETY: we own the datalogger per IPC protocol.
                             unsafe { (*runtime.cell).get() }.arm_trigger();
+                            runtime.data_acquired = false;
                         }
                     }
                     Main2LoopMsg::DisarmTrigger => {
@@ -255,12 +256,12 @@ impl LoopHandler {
             dl.process(timebase, &host);
 
             if !self.loop2main.has_content() {
-                if dl.data_acquired() && !runtime.data_notified {
+                if dl.data_acquired() && !runtime.data_acquired {
                     self.loop2main.send(Loop2MainMsg {
                         kind: Loop2MainMsgKind::DataAcquired,
                         ..Loop2MainMsg::DEFAULT
                     });
-                    runtime.data_notified = true;
+                    runtime.data_acquired = true;
                 } else {
                     let state = dl.get_state();
                     let (bytes_to_complete, write_counter) = if state == State::Triggered {

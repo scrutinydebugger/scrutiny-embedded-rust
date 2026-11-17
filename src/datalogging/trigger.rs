@@ -6,14 +6,12 @@ use crate::types::{AnyType, VariableType, BIGGEST_SINT, BIGGEST_UINT};
 pub struct ConditionSharedData {
     /// Previous value for the `ChangeMoreThan` condition.
     pub cmt_previous_val: AnyType,
-    pub cmt_previous_valtype: VariableType,
     pub cmt_initialized: bool,
 }
 
 impl ConditionSharedData {
     pub const DEFAULT: Self = Self {
         cmt_previous_val: AnyType { uint32: 0 },
-        cmt_previous_valtype: VariableType::Uint32,
         cmt_initialized: false,
     };
 }
@@ -230,7 +228,6 @@ pub fn change_more_than_eval(data: &mut ConditionSharedData, ops: &[AnyValAndTyp
 
     // Store current value as previous for next evaluation.
     data.cmt_previous_val = ops[0].val;
-    data.cmt_previous_valtype = ops[0].valtype;
 
     outval
 }

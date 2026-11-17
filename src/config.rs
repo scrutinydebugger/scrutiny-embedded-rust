@@ -5,7 +5,10 @@ use crate::types::{AnyType, RuntimePublishedValue};
 use crate::types::AddressRange;
 
 /// Callback to read a Runtime Published Value.
-pub type RpvReadCallback = fn(RuntimePublishedValue, &mut AnyType) -> bool;
+///
+/// `caller` identifies the loop that triggered the read (by its `&'static str` name),
+/// or `None` when the main handler performed the read directly (e.g. `MemoryControl::ReadRpv`).
+pub type RpvReadCallback = fn(RuntimePublishedValue, &mut AnyType, Option<&'static str>) -> bool;
 
 /// Callback to write a Runtime Published Value.
 pub type RpvWriteCallback = fn(RuntimePublishedValue, &AnyType) -> bool;
@@ -16,7 +19,9 @@ pub type UserCommandCallback = fn(u8, &[u8], &mut [u8], &mut u16);
 
 #[cfg(feature = "datalogging")]
 /// Callback triggered when a datalogging acquisition fires.
-pub type DataloggingTriggerCallback = fn();
+///
+/// `caller` identifies the loop whose datalogger fired, by its `&'static str` name.
+pub type DataloggingTriggerCallback = fn(Option<&'static str>);
 
 #[cfg(feature = "datalogging")]
 /// Datalogger buffer descriptor returned by `Config::take_datalogger_buf`.
@@ -47,7 +52,7 @@ pub struct Config<'rxbuf, 'txbuf> {
     #[cfg(feature = "datalogging")]
     datalogger_buf_len: usize,
     #[cfg(feature = "datalogging")]
-    datalogger_trigger_cb: Option<fn()>,
+    datalogger_trigger_cb: Option<DataloggingTriggerCallback>,
 
     user_command_callback: Option<UserCommandCallback>,
 
@@ -237,7 +242,7 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
     /// # Safety
     /// `buf` must be valid for `len` bytes and must outlive the `MainHandler` created from this config.
     #[cfg(feature = "datalogging")]
-    pub unsafe fn set_datalogger_buffer(&mut self, buf: *mut u8, len: usize, trigger_cb: Option<fn()>) {
+    pub unsafe fn set_datalogger_buffer(&mut self, buf: *mut u8, len: usize, trigger_cb: Option<DataloggingTriggerCallback>) {
         self.datalogger_buf = buf;
         self.datalogger_buf_len = len;
         self.datalogger_trigger_cb = trigger_cb;
@@ -350,7 +355,7 @@ mod tests {
             id: 1,
             var_type: VariableType::Uint32,
         }];
-        fn read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType) -> bool {
+        fn read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType, _caller: Option<&'static str>) -> bool {
             true
         }
         fn write_cb(_rpv: RuntimePublishedValue, _in: &AnyType) -> bool {
@@ -373,7 +378,7 @@ mod tests {
             id: 2,
             var_type: VariableType::Sint32,
         }];
-        fn read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType) -> bool {
+        fn read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType, _caller: Option<&'static str>) -> bool {
             false
         }
 

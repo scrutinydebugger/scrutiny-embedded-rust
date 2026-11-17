@@ -34,6 +34,10 @@ pub(crate) trait DataloggerHost {
 
     /// Calls the RPV read callback, filling `out` with the RPV's current value.
     fn read_rpv(&self, rpv: RuntimePublishedValue, out: &mut AnyType) -> bool;
+
+    /// Identity of the caller (loop name) for callbacks that need to disambiguate contexts.
+    /// Default is `None`, which represents a call originating from the main handler.
+    fn caller_name(&self) -> Option<&'static str> { None }
 }
 
 // ── DataLogger state machine ──────────────────────────────────────────────────
@@ -64,7 +68,7 @@ pub struct DataLogger {
     config: Configuration,
     encoder: RawFormatEncoder,
     buffer_size: usize,
-    trigger_callback: Option<fn()>,
+    trigger_callback: Option<crate::config::DataloggingTriggerCallback>,
     trigger_timestamp: Timestamp,
     trigger_cursor_location: usize,
     remaining_data_to_write: usize,
@@ -86,7 +90,11 @@ impl DataLogger {
     /// # Safety
     /// `buffer` must be valid for `buffer_len` bytes for the lifetime of this `DataLogger`.
     #[must_use]
-    pub unsafe fn new(buffer: *mut u8, buffer_len: usize, trigger_callback: Option<fn()>) -> Self {
+    pub unsafe fn new(
+        buffer: *mut u8,
+        buffer_len: usize,
+        trigger_callback: Option<crate::config::DataloggingTriggerCallback>,
+    ) -> Self {
         let mut dl = Self {
             config: Configuration::DEFAULT,
             // Safety: forwarded from caller.
@@ -135,7 +143,6 @@ impl DataLogger {
     /// Call once per acquisition request.
     pub(crate) fn configure(
         &mut self,
-        timebase: &Timebase,
         config_id: u16,
         host: &dyn DataloggerHost,
     ) {
@@ -240,10 +247,6 @@ impl DataLogger {
         } else {
             self.state = State::Error;
         }
-
-        // Suppress unused `timebase` warning — it may be used for future extensions
-        // and mirrors the C++ API signature.
-        let _ = timebase;
     }
 
     /// Arms the trigger so the datalogger actively watches for the trigger condition.
@@ -287,7 +290,7 @@ impl DataLogger {
 
                 if self.state == State::Armed && self.check_trigger(timebase, host) {
                     if let Some(cb) = self.trigger_callback {
-                        cb();
+                        cb(host.caller_name());
                     }
                     self.stamp_trigger_point(timebase);
                     self.state = State::Triggered;
@@ -871,7 +874,7 @@ mod tests {
         }
     }
 
-    fn trigger_callback() {
+    fn trigger_callback(_caller: Option<&'static str>) {
         TRIGGER_CB_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
 
@@ -933,7 +936,7 @@ mod tests {
             );
             cfg.probe_location = 128;
         }
-        dl.configure(&tb, 0, &host);
+        dl.configure(0, &host);
 
         // Not armed: condition met but process() must not trigger.
         my_var = 3.141_592_6_f32;
@@ -982,7 +985,7 @@ mod tests {
             };
             cfg.probe_location = 128;
         }
-        dl.configure(&tb, 0, &host);
+        dl.configure(0, &host);
         dl.arm_trigger();
 
         // Condition false: no trigger.
@@ -1006,7 +1009,6 @@ mod tests {
     #[test]
     fn configure_rejects_varbit_with_bitsize_zero() {
         let host = make_host();
-        let tb = Timebase::new();
         let dummy: u32 = 0;
         let mut dl_buf = [0u8; 128];
 
@@ -1037,7 +1039,7 @@ mod tests {
                 hold_time_100ns: 0,
             };
         }
-        dl.configure(&tb, 0, &host);
+        dl.configure(0, &host);
         assert_eq!(dl.get_state(), State::Error);
         assert!(!dl.config_valid());
     }
@@ -1075,7 +1077,7 @@ mod tests {
             };
             cfg.probe_location = 128;
         }
-        dl.configure(&tb, 0, &host);
+        dl.configure(0, &host);
 
         // Not armed — data is NOT acquired even after many ticks.
         dl.process(&tb, &host);
@@ -1144,7 +1146,7 @@ mod tests {
                     hold_time_100ns: 0,
                 };
             }
-            dl.configure(&tb, 0, &host);
+            dl.configure(0, &host);
             dl.arm_trigger();
 
             let max_loops = buf_len * 8;
@@ -1196,7 +1198,7 @@ mod tests {
                 hold_time_100ns: 0,
             };
         }
-        dl.configure(&tb, 0, &host);
+        dl.configure(0, &host);
 
         // Fill buffer first.
         let mut i = 0;
@@ -1292,7 +1294,7 @@ mod tests {
                     hold_time_100ns: 50,
                 };
             }
-            dl.configure(&tb, probe_loop, &host);
+            dl.configure(probe_loop, &host);
 
             // Pre-arm pre-fill (100 steps of 10 ticks each).
             for _ in 0..100 {
@@ -1530,6 +1532,43 @@ mod tests {
         assert!(fetch_operand(&host, &op, &mut out));
         assert_eq!(out.valtype, VariableType::Sint16);
         assert_eq!(unsafe { out.val.sint16 }, raw_val);
+    }
+
+    #[test]
+    fn fetch_var_boolean_behaves_as_boolean8() {
+        let host = FetchTestHost;
+        let v: u8 = 1;
+        let op_b = Operand::Var { addr: &raw const v, datatype: VariableType::Boolean };
+        let op_b8 = Operand::Var { addr: &raw const v, datatype: VariableType::Boolean8 };
+
+        let mut out_b = AnyValAndTypePair::DEFAULT;
+        let mut out_b8 = AnyValAndTypePair::DEFAULT;
+        assert!(fetch_operand(&host, &op_b, &mut out_b));
+        assert!(fetch_operand(&host, &op_b8, &mut out_b8));
+
+        convert_to_compare_type(&mut out_b);
+        convert_to_compare_type(&mut out_b8);
+        assert_eq!(out_b.valtype, out_b8.valtype);
+        assert_eq!(
+            crate::tools::read_biggest_uint(&out_b.val),
+            crate::tools::read_biggest_uint(&out_b8.val)
+        );
+    }
+
+    #[test]
+    fn fetch_varbit_boolean_datatype() {
+        let host = FetchTestHost;
+        let v: u8 = 0b0000_0010;
+        let op = Operand::VarBit {
+            addr: &raw const v,
+            datatype: VariableType::Boolean,
+            bitoffset: 1,
+            bitsize: 1,
+        };
+        let mut out = AnyValAndTypePair::DEFAULT;
+        assert!(fetch_operand(&host, &op, &mut out));
+        assert_eq!(out.valtype, VariableType::Boolean8);
+        assert_eq!(unsafe { out.val.uint8 }, 1);
     }
 
     #[test]

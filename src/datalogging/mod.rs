@@ -31,7 +31,11 @@ impl DataLoggerCell {
     ///
     /// # Safety
     /// `buf` must be valid for `len` bytes for the lifetime of this `DataLoggerCell`.
-    pub(crate) unsafe fn new(buf: *mut u8, len: usize, trigger_callback: Option<fn()>) -> Self {
+    pub(crate) unsafe fn new(
+        buf: *mut u8,
+        len: usize,
+        trigger_callback: Option<crate::config::DataloggingTriggerCallback>,
+    ) -> Self {
         // Safety: forwarded from caller.
         Self(UnsafeCell::new(unsafe { DataLogger::new(buf, len, trigger_callback) }))
     }

@@ -20,7 +20,7 @@ static mut SOME_VAR_LOGGED1: f32 = 0.0;
 static TEST_RPVS: [RuntimePublishedValue; 1] =
     [RuntimePublishedValue { id: 0x8888, var_type: VariableType::Float32 }];
 
-fn rpv_read_callback(rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
+fn rpv_read_callback(rpv: RuntimePublishedValue, out: &mut AnyType, _caller: Option<&'static str>) -> bool {
     if rpv.id == 0x8888 && rpv.var_type == VariableType::Float32 {
         out.float32 = 1.7f32;
         true
@@ -495,7 +495,7 @@ fn test_configure_operand_bad_rpv() {
     cfg.operands[0] = DlOperand::Rpv(0x9999); // doesn't exist
     let resp = send_configure(&mut h, &cfg);
     h.process(0);
-    assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
+    assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
 }
 
 #[cfg(feature = "protected_regions")]
@@ -685,7 +685,7 @@ fn test_configure_loggable_bad_rpv() {
     cfg.signals[0] = DlSignal::Rpv(0x9999); // doesn't exist
     let resp = send_configure(&mut h, &cfg);
     h.process(0);
-    assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
+    assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
 }
 
 #[test]

@@ -39,6 +39,9 @@ pub enum VariableType {
     Uint32 = (VariableTypeType::VTTuint as u8) | (VariableTypeSize::VTS32 as u8),
     Float32 = (VariableTypeType::VTTfloat as u8) | (VariableTypeSize::VTS32 as u8),
     Cfloat32 = (VariableTypeType::VTTcfloat as u8) | (VariableTypeSize::VTS32 as u8),
+    /// Size-unspecified boolean. Treated as a 1-byte boolean (identical to `Boolean8`)
+    /// across the lib: same `type_size`, same `convert_to_compare_type` behavior,
+    /// same encoding.
     Boolean = (VariableTypeType::VTTboolean as u8) | (VariableTypeSize::VTSundef as u8),
     #[cfg(feature = "support_64bits")]
     Sint64 = (VariableTypeType::VTTsint as u8) | (VariableTypeSize::VTS64 as u8),

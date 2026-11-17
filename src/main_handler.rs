@@ -109,8 +109,10 @@ impl DataloggerHost for RpvHost {
     }
 
     fn read_rpv(&self, rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
-        self.rpv_read_callback.is_some_and(|cb| cb(rpv, out))
+        self.rpv_read_callback.is_some_and(|cb| cb(rpv, out, None))
     }
+
+    // caller_name() defaults to None — reads from the main handler have no owning loop.
 }
 
 // ── MainHandler ───────────────────────────────────────────────────────────────
@@ -219,8 +221,13 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             self.comm.reset(&self.timebase);
             #[cfg(feature = "datalogging")]
             if let Some(ref cell) = self.datalogger_cell {
-                // Safety: no loop owns the datalogger when handler is disabled.
-                unsafe { cell.get() }.reset();
+                if self.dl.owner.is_none() {
+                    // Safety: no loop owns the datalogger, so no concurrent access to the cell.
+                    unsafe { cell.get() }.reset();
+                }
+                // else: a loop currently owns the datalogger; resetting here would alias with the
+                // loop's `cell.get()` calls. The handler is permanently disabled from this point,
+                // so leaving the datalogger in its current state is inert.
             }
             return;
         }
@@ -324,6 +331,44 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
     #[must_use]
     pub const fn get_session_id(&self) -> u32 {
         self.comm.get_session_id()
+    }
+
+    /// Returns the last-known datalogger state, or `None` if datalogging is not configured.
+    /// The value reflects the most recent `StatusUpdate`/`DataAcquired` IPC from the owning loop
+    /// (or a direct read when no loop owns the datalogger).
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub const fn datalogging_state(&self) -> Option<DlState> {
+        if self.datalogger_cell.is_some() {
+            Some(self.dl.cached_state)
+        } else {
+            None
+        }
+    }
+
+    /// Returns `true` if an acquisition has completed and data is ready to be read.
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub const fn datalogging_data_available(&self) -> bool {
+        self.datalogger_cell.is_some() && matches!(self.dl.cached_state, DlState::AcquisitionCompleted)
+    }
+
+    /// Returns `true` if the datalogger subsystem is in an error state.
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub const fn datalogging_in_error(&self) -> bool {
+        if self.datalogger_cell.is_none() {
+            return false;
+        }
+        matches!(self.dl.cached_state, DlState::Error)
+            || !matches!(self.dl.error, DataloggingError::None)
+    }
+
+    /// Returns `true` if a loop currently owns the datalogger.
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub const fn datalogging_ownership_taken(&self) -> bool {
+        self.dl.owner.is_some()
     }
 
     fn check_finished_sending(&mut self) {
@@ -1015,7 +1060,35 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                     if region_err { dl_obj.reset(); return ResponseCode::Forbidden; }
                 }
 
-                dl_obj.configure(&Timebase::new(), config_id, &host);
+                // Validate RPV existence for Rpv operands and Rpv loggable items.
+                // Mirrors C++: RPV-not-found returns FailureToProceed (distinct from InvalidRequest
+                // for malformed payload / invalid condition).
+                {
+                    use crate::datalogging::types::{Operand, LoggableItem};
+                    let config = dl_obj.config_ref();
+                    let mut rpv_err = false;
+                    for i in 0..config.trigger.operand_count as usize {
+                        if let Operand::Rpv { id } = config.trigger.operands[i] {
+                            if !host.is_rpv_read_configured() || !host.rpv_exists(id) {
+                                rpv_err = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !rpv_err {
+                        for i in 0..config.items_count as usize {
+                            if let LoggableItem::Rpv { id } = config.items_to_log[i] {
+                                if !host.is_rpv_read_configured() || !host.rpv_exists(id) {
+                                    rpv_err = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if rpv_err { dl_obj.reset(); return ResponseCode::FailureToProceed; }
+                }
+
+                dl_obj.configure(config_id, &host);
 
                 if dl_obj.config_valid() {
                     dl.pending_new_owner = Some(loop_id);

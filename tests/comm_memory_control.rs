@@ -778,7 +778,7 @@ fn test_write_masked_forbidden_address() {
 
 // ── MemoryControl/ReadRpv ────────────────────────────────────────────────────
 
-fn rpv_read_cb(rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
+fn rpv_read_cb(rpv: RuntimePublishedValue, out: &mut AnyType, _caller: Option<&'static str>) -> bool {
     match rpv.id {
         0x1122 => { out.uint32 = 0x12345678; true }
         0x3344 => { out.uint16 = 0xABCD; true }

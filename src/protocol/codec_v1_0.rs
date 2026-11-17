@@ -774,7 +774,7 @@ pub fn encode_response_memory_control_read_rpv(
         }
 
         let mut val = AnyType { uint8: 0 };
-        if !read_cb(rpv, &mut val) {
+        if !read_cb(rpv, &mut val, None) {
             return Err(ResponseCode::FailureToProceed);
         }
 

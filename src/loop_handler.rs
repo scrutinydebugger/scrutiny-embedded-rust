@@ -52,6 +52,7 @@ impl LoopDlRuntime {
 struct LoopHost {
     rpvs:        Option<&'static [RuntimePublishedValue]>,
     rpv_read_cb: Option<RpvReadCallback>,
+    caller_name: &'static str,
 }
 
 #[cfg(feature = "datalogging")]
@@ -74,8 +75,10 @@ impl DataloggerHost for LoopHost {
     }
 
     fn read_rpv(&self, rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
-        self.rpv_read_cb.is_some_and(|cb| cb(rpv, out))
+        self.rpv_read_cb.is_some_and(|cb| cb(rpv, out, Some(self.caller_name)))
     }
+
+    fn caller_name(&self) -> Option<&'static str> { Some(self.caller_name) }
 }
 
 /// Describes a time domain in which scrutiny-related probing can occur.
@@ -221,7 +224,6 @@ impl LoopHandler {
                         if runtime.owns && !runtime.cell.is_null() {
                             // SAFETY: we own the datalogger per IPC protocol.
                             unsafe { (*runtime.cell).get() }.arm_trigger();
-                            runtime.data_acquired = false;
                         }
                     }
                     Main2LoopMsg::DisarmTrigger => {
@@ -252,6 +254,7 @@ impl LoopHandler {
             let host = LoopHost {
                 rpvs: runtime.rpvs,
                 rpv_read_cb: runtime.rpv_read_cb,
+                caller_name: self.name,
             };
             dl.process(timebase, &host);
 

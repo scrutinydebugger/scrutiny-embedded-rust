@@ -1,3 +1,5 @@
+#![cfg(feature = "datalogging")]
+
 use scrutiny_embedded_rust::datalogging::trigger::{
     always_true_eval, change_more_than_eval, change_more_than_reset, equal_eval,
     greater_or_equal_than_eval, greater_than_eval, is_within_eval, less_or_equal_than_eval,

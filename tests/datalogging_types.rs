@@ -1,3 +1,5 @@
+#![cfg(feature = "datalogging")]
+
 use scrutiny_embedded_rust::datalogging::{convert_to_compare_type, AnyValAndTypePair};
 use scrutiny_embedded_rust::tools::{
     read_biggest_float, read_biggest_sint, read_biggest_uint, set_biggest_float, set_biggest_sint,

@@ -318,14 +318,21 @@ impl CommHandler {
 
         // Header: cmd|0x80, subfn, code, len_hi, len_lo
         while self.nbytes_sent < 5 && i < to_copy {
-            out[i as usize] = match self.nbytes_sent {
-                0 => self.active_response.command_id | 0x80,
-                1 => self.active_response.subfunction_id,
-                2 => self.active_response.response_code,
-                3 => (self.active_response.data_length >> 8) as u8,
-                4 => (self.active_response.data_length & 0xFF) as u8,
-                _ => unreachable!(),
+            let header_byte = match self.nbytes_sent {
+                0 => Some(self.active_response.command_id | 0x80),
+                1 => Some(self.active_response.subfunction_id),
+                2 => Some(self.active_response.response_code),
+                3 => Some((self.active_response.data_length >> 8) as u8),
+                4 => Some((self.active_response.data_length & 0xFF) as u8),
+                _ => None,
             };
+            let Some(byte) = header_byte else {
+                // Impossible state: silently cancel the transmission instead of panicking.
+                self.reset_tx();
+                self.wait_next_request(tb);
+                return i;
+            };
+            out[i as usize] = byte;
             i += 1;
             self.nbytes_sent += 1;
         }

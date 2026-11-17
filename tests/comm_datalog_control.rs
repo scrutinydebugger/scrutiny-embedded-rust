@@ -8,6 +8,7 @@ use scrutiny_embedded_rust::main_handler::MainHandler;
 use scrutiny_embedded_rust::protocol::{CommandId, CommControlSubfn, DataLogControlSubfn, ResponseCode, CONNECT_MAGIC};
 use scrutiny_embedded_rust::tools::crc32;
 use scrutiny_embedded_rust::types::{AnyType, RuntimePublishedValue, VariableType};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 #[cfg(feature = "protected_regions")]
 use scrutiny_embedded_rust::types::AddressRange;
@@ -1284,4 +1285,298 @@ fn test_process_again_completes_before_timeout() {
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
     assert!(!h.datalogging_ownership_taken());
     assert_eq!(get_status_state(&mut h), DlState::Idle as u8);
+}
+
+// ── Read-with-release flow (D-03) ─────────────────────────────────────────────
+
+// AlwaysTrue trigger on loop 0 that logs the loop time and a u32 counter.
+fn get_counter_trigger_config(counter: &AtomicU32) -> DlConfig {
+    DlConfig {
+        loop_id: 0,
+        config_id: 0x1357,
+        decimation: 1,
+        probe_location: 0,
+        timeout_100ns: 0,
+        trigger_condition: 0, // AlwaysTrue
+        hold_time_100ns: 1,
+        operands: vec![],
+        signals: vec![
+            DlSignal::Time,
+            DlSignal::Memory { addr: counter.as_ptr() as usize, size: 4 },
+        ],
+    }
+}
+
+// Like run_until_acquisition, but increments the counter before each loop step of 1 time unit,
+// so the counter and the loop timestamp advance together.
+fn run_until_acquisition_with_counter(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop, counter: &AtomicU32) {
+    for _ in 0..500 {
+        counter.fetch_add(1, Ordering::Relaxed);
+        loop_handler.process_with_time(1);
+        h.process(1);
+        if get_status_state(h) == DlState::AcquisitionCompleted as u8 {
+            return;
+        }
+    }
+    panic!("Acquisition did not complete within 500 iterations");
+}
+
+// Configure with the counter config, give ownership to the loop, arm and run until the acquisition completes.
+fn setup_completed_counter_acquisition(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop, counter: &AtomicU32) {
+    let resp = send_configure(h, &get_counter_trigger_config(counter));
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    do_ownership_transfer(h, loop_handler);
+    assert!(h.datalogging_ownership_taken());
+    do_arm_trigger(h, loop_handler);
+    run_until_acquisition_with_counter(h, loop_handler, counter);
+    assert!(h.datalogging_ownership_taken());
+}
+
+// Reads every ReadAcquisition chunk while no loop owns the datalogger. Checks the rolling counter,
+// the acquisition ID and the final CRC. Returns the concatenated data.
+fn read_all_acquisition(h: &mut MainHandler<'_, '_>, acquisition_id: u16) -> Vec<u8> {
+    let mut all_data: Vec<u8> = Vec::new();
+    for i in 0..200usize {
+        let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ReadAcquisition as u8, &[]);
+        let resp = send_and_recv(h, &req);
+        h.process(0);
+        assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "chunk {i}");
+        let p = resp_payload(&resp);
+        assert!(p.len() >= 4, "chunk {i}: payload too short");
+        assert_eq!(p[1], (i % 256) as u8, "rolling counter mismatch at chunk {i}");
+        assert_eq!(u16::from_be_bytes([p[2], p[3]]), acquisition_id, "acquisition ID mismatch at chunk {i}");
+        let finished = p[0] != 0;
+        if finished {
+            assert!(p.len() >= 8, "chunk {i}: last payload too short");
+            let data_end = p.len() - 4;
+            all_data.extend_from_slice(&p[4..data_end]);
+            let stored_crc = u32::from_be_bytes([p[data_end], p[data_end + 1], p[data_end + 2], p[data_end + 3]]);
+            assert_eq!(stored_crc, crc32(&all_data, 0), "final CRC mismatch");
+            return all_data;
+        }
+        all_data.extend_from_slice(&p[4..]);
+    }
+    panic!("ReadAcquisition did not finish within 200 chunks");
+}
+
+// Each entry is the loop time (u32, big endian) followed by the counter (u32, native endian).
+// Both advance together, so their difference is the same in every entry.
+fn check_counter_entries(data: &[u8]) {
+    assert!(!data.is_empty());
+    assert_eq!(data.len() % 8, 0, "data must hold whole entries");
+    let mut expected_offset: Option<u32> = None;
+    let mut first_ts: Option<u32> = None;
+    let mut last_ts = 0u32;
+    for (i, entry) in data.chunks_exact(8).enumerate() {
+        let ts = u32::from_be_bytes([entry[0], entry[1], entry[2], entry[3]]);
+        let val = u32::from_ne_bytes([entry[4], entry[5], entry[6], entry[7]]);
+        let offset = val.wrapping_sub(ts);
+        match expected_offset {
+            None => expected_offset = Some(offset),
+            Some(o) => assert_eq!(offset, o, "entry {i}: counter does not match the logged time"),
+        }
+        if first_ts.is_none() {
+            first_ts = Some(ts);
+        } else {
+            assert!(ts >= last_ts, "entry {i}: time going backward");
+        }
+        last_ts = ts;
+    }
+    assert!(first_ts.is_some_and(|t| last_ts > t), "logged time should advance");
+}
+
+// Sends GetAcquisitionMetadata while the loop owns a completed acquisition and asserts each step of the
+// release-for-read flow, then reads the data. Returns the metadata payload.
+fn do_explicit_read_release_flow(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop) -> Vec<u8> {
+    assert!(h.datalogging_ownership_taken());
+    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+    h.receive_data(&req);
+    h.process(0); // ProcessAgain, ReleaseOwnership sent to the loop
+    assert_eq!(h.data_to_send(), 0, "no response before the loop releases the datalogger");
+    assert!(h.datalogging_ownership_taken(), "loop still owns the datalogger");
+
+    loop_handler.process_with_time(0); // Releases the datalogger
+    h.process(0); // Receives OwnershipReleased, then answers the request
+    let resp = pop_response(h);
+    h.process(0);
+    assert_eq!(resp[0], CommandId::DataLogControl as u8 | 0x80);
+    assert_eq!(resp[1], DataLogControlSubfn::GetAcquisitionMetadata as u8);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    assert!(!h.datalogging_ownership_taken(), "loop should have released the datalogger");
+
+    let metadata = resp_payload(&resp).to_vec();
+    assert_eq!(metadata.len(), 16);
+    let acquisition_id = u16::from_be_bytes([metadata[0], metadata[1]]);
+    let config_id = u16::from_be_bytes([metadata[2], metadata[3]]);
+    let entry_count = u32::from_be_bytes([metadata[4], metadata[5], metadata[6], metadata[7]]) as usize;
+    let data_size = u32::from_be_bytes([metadata[8], metadata[9], metadata[10], metadata[11]]) as usize;
+    assert_eq!(config_id, 0x1357);
+    assert!(entry_count > 0, "the release must not reset the acquisition");
+    assert_eq!(data_size, entry_count * 8);
+
+    let data = read_all_acquisition(h, acquisition_id);
+    assert_eq!(data.len(), data_size);
+    check_counter_entries(&data);
+
+    assert_eq!(get_status_state(h), DlState::AcquisitionCompleted as u8);
+    assert!(h.datalogging_data_available());
+    assert!(!h.datalogging_ownership_taken());
+    metadata
+}
+
+// GetAcquisitionMetadata is held until the owning loop releases the datalogger; the data is preserved
+// by that release and can be read in several chunks.
+#[test]
+fn test_read_release_flow_explicit() {
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOPS_RR_EXPLICIT: [&LoopHandler; 1] = [LOOP1.handler()];
+    static mut DL_BUF_RR_EXPLICIT: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    static COUNTER_RR_EXPLICIT: AtomicU32 = AtomicU32::new(1000);
+    let mut rx = [0u8; 256];
+    let mut tx = [0u8; 64]; // Forces several ReadAcquisition chunks
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_EXPLICIT) }, &LOOPS_RR_EXPLICIT);
+    connect(&mut h);
+
+    setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_RR_EXPLICIT);
+    do_explicit_read_release_flow(&mut h, &LOOP1);
+
+    // A second read gives the same data, nothing was consumed or reset.
+    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+    let resp = send_and_recv(&mut h, &req);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    let acquisition_id = u16::from_be_bytes([resp_payload(&resp)[0], resp_payload(&resp)[1]]);
+    check_counter_entries(&read_all_acquisition(&mut h, acquisition_id));
+}
+
+// After a read, no loop owns the datalogger, so ArmTrigger and DisarmTrigger fail until the next Configure.
+#[test]
+fn test_arm_after_read_fails() {
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOPS_RR_ARM: [&LoopHandler; 1] = [LOOP1.handler()];
+    static mut DL_BUF_RR_ARM: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    static COUNTER_RR_ARM: AtomicU32 = AtomicU32::new(1000);
+    let mut rx = [0u8; 256];
+    let mut tx = [0u8; 64];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_ARM) }, &LOOPS_RR_ARM);
+    connect(&mut h);
+
+    setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_RR_ARM);
+    do_explicit_read_release_flow(&mut h, &LOOP1);
+
+    let arm_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ArmTrigger as u8, &[]);
+    let resp = send_and_recv(&mut h, &arm_req);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
+
+    let disarm_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::DisarmTrigger as u8, &[]);
+    let resp = send_and_recv(&mut h, &disarm_req);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
+
+    // The loop is not given the datalogger back and the acquisition is still available.
+    LOOP1.process_with_time(1);
+    h.process(0);
+    assert!(!h.datalogging_ownership_taken());
+    assert_eq!(get_status_state(&mut h), DlState::AcquisitionCompleted as u8);
+}
+
+// Mirrors the server poller (datalogging_poller.py): Configure, Arm, GetStatus until complete,
+// GetAcquisitionMetadata, ReadAcquisition until finished, ResetDatalogger, then a new Configure and Arm.
+#[test]
+fn test_full_server_sequence() {
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOPS_SERVER_SEQ: [&LoopHandler; 1] = [LOOP1.handler()];
+    static mut DL_BUF_SERVER_SEQ: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    static COUNTER_SERVER_SEQ: AtomicU32 = AtomicU32::new(1000);
+    let mut rx = [0u8; 256];
+    let mut tx = [0u8; 64];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_SERVER_SEQ) }, &LOOPS_SERVER_SEQ);
+    connect(&mut h);
+
+    for cycle in 0..2 {
+        setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_SERVER_SEQ);
+
+        let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+        let resp = send_and_recv_with_release(&mut h, &LOOP1, &req);
+        h.process(0);
+        assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "cycle {cycle}");
+        let acquisition_id = u16::from_be_bytes([resp_payload(&resp)[0], resp_payload(&resp)[1]]);
+        let data_size = u32::from_be_bytes([
+            resp_payload(&resp)[8],
+            resp_payload(&resp)[9],
+            resp_payload(&resp)[10],
+            resp_payload(&resp)[11],
+        ]) as usize;
+
+        let data = read_all_acquisition(&mut h, acquisition_id);
+        assert_eq!(data.len(), data_size, "cycle {cycle}");
+        check_counter_entries(&data);
+
+        let reset_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ResetDatalogger as u8, &[]);
+        let resp = send_and_recv(&mut h, &reset_req);
+        h.process(0);
+        assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "cycle {cycle}");
+        assert_eq!(get_status_state(&mut h), DlState::Idle as u8, "cycle {cycle}");
+        assert!(!h.datalogging_data_available());
+    }
+}
+
+// A release requested by Configure uses the default reset_on_release = true, even after a release-for-read.
+// The Configure is left to time out so the reset done by the release itself is observable.
+#[test]
+fn test_release_without_read_resets() {
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOPS_RR_RESET: [&LoopHandler; 1] = [LOOP1.handler()];
+    static mut DL_BUF_RR_RESET: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    static COUNTER_RR_RESET: AtomicU32 = AtomicU32::new(1000);
+    let mut rx = [0u8; 256];
+    let mut tx = [0u8; 64];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_RESET) }, &LOOPS_RR_RESET);
+    connect(&mut h);
+
+    // First cycle uses the release-for-read path (reset_on_release = false).
+    setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_RR_RESET);
+    do_explicit_read_release_flow(&mut h, &LOOP1);
+
+    // Second cycle: Configure while the loop owns a completed acquisition.
+    setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_RR_RESET);
+    assert!(h.datalogging_data_available());
+
+    let payload = encode_configure_payload(&get_counter_trigger_config(&COUNTER_RR_RESET));
+    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ConfigureDatalog as u8, &payload);
+    h.receive_data(&req);
+    h.process(0); // ProcessAgain, ReleaseOwnership sent to the loop
+    assert_eq!(h.data_to_send(), 0);
+
+    // The loop does not run, so the Configure times out.
+    let step = REQUEST_MAX_PROCESS_TIME_US; // A tenth of the timeout, in 100ns units
+    for _ in 0..20 {
+        if h.data_to_send() > 0 {
+            break;
+        }
+        h.process(step);
+    }
+    assert!(h.data_to_send() > 0, "Configure should time out");
+    let resp = pop_response(&mut h);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
+    assert!(h.datalogging_ownership_taken());
+
+    // The release arrives late; it must reset the datalogger.
+    LOOP1.process_with_time(0);
+    h.process(0);
+    assert!(!h.datalogging_ownership_taken());
+    assert_eq!(get_status_state(&mut h), DlState::Idle as u8, "release without read must reset the datalogger");
+    assert!(!h.datalogging_data_available());
+    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+    let resp = send_and_recv(&mut h, &req);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
+
+    // Reconfigure: the datalogger goes back to the loop and a new acquisition can be read.
+    setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_RR_RESET);
+    assert_eq!(h.get_datalogger_state(), DlState::AcquisitionCompleted);
+    do_explicit_read_release_flow(&mut h, &LOOP1);
 }

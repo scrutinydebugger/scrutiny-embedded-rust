@@ -51,9 +51,7 @@ pub struct Config<'rxbuf, 'txbuf> {
     loops: Option<&'static [&'static LoopHandler]>,
 
     #[cfg(feature = "datalogging")]
-    datalogger_buf: *mut u8,
-    #[cfg(feature = "datalogging")]
-    datalogger_buf_len: usize,
+    datalogger_buf: Option<&'static mut [u8]>,
     #[cfg(feature = "datalogging")]
     datalogger_trigger_cb: Option<DataloggingTriggerCallback>,
 
@@ -85,9 +83,7 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
             rpv_write_callback: None,
             loops: None,
             #[cfg(feature = "datalogging")]
-            datalogger_buf: core::ptr::null_mut(),
-            #[cfg(feature = "datalogging")]
-            datalogger_buf_len: 0,
+            datalogger_buf: None,
             #[cfg(feature = "datalogging")]
             datalogger_trigger_cb: None,
             user_command_callback: None,
@@ -113,8 +109,7 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
         self.loops = None;
         #[cfg(feature = "datalogging")]
         {
-            self.datalogger_buf = core::ptr::null_mut();
-            self.datalogger_buf_len = 0;
+            self.datalogger_buf = None;
             self.datalogger_trigger_cb = None;
         }
         self.user_command_callback = None;
@@ -251,14 +246,12 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
         self.loops.map_or(0, |s| u8::try_from(s.len()).unwrap_or(u8::MAX))
     }
 
-    /// Registers a raw buffer for use by the datalogging subsystem.
+    /// Registers the buffer used by the datalogging subsystem.
     ///
-    /// # Safety
-    /// `buf` must be valid for `len` bytes and must outlive the `MainHandler` created from this config.
+    /// The buffer is shared with the loop time domains, hence the `'static` lifetime.
     #[cfg(feature = "datalogging")]
-    pub unsafe fn set_datalogger_buffer(&mut self, buf: *mut u8, len: usize, trigger_cb: Option<DataloggingTriggerCallback>) {
-        self.datalogger_buf = buf;
-        self.datalogger_buf_len = len;
+    pub fn set_datalogger_buffer(&mut self, buf: &'static mut [u8], trigger_cb: Option<DataloggingTriggerCallback>) {
+        self.datalogger_buf = Some(buf);
         self.datalogger_trigger_cb = trigger_cb;
     }
 
@@ -266,22 +259,21 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
     #[cfg(feature = "datalogging")]
     #[must_use]
     pub const fn is_datalogging_configured(&self) -> bool {
-        !self.datalogger_buf.is_null() && self.datalogger_buf_len > 0
+        match &self.datalogger_buf {
+            Some(buf) => !buf.is_empty(),
+            None => false,
+        }
     }
 
     /// Moves the datalogger buffer configuration out of the config; used by `MainHandler` during initialization.
     #[cfg(feature = "datalogging")]
     pub(crate) fn take_datalogger_buf(&mut self) -> Option<DataloggerBufDesc> {
-        if self.datalogger_buf.is_null() || self.datalogger_buf_len == 0 {
+        let buf = self.datalogger_buf.take()?;
+        let cb = self.datalogger_trigger_cb.take();
+        if buf.is_empty() {
             return None;
         }
-        let buf = self.datalogger_buf;
-        let len = self.datalogger_buf_len;
-        let cb = self.datalogger_trigger_cb;
-        self.datalogger_buf = core::ptr::null_mut();
-        self.datalogger_buf_len = 0;
-        self.datalogger_trigger_cb = None;
-        Some((buf, len, cb))
+        Some((buf.as_mut_ptr(), buf.len(), cb))
     }
 
     /// Returns the RPV read callback, or `None` if unset.
@@ -421,6 +413,36 @@ mod tests {
         assert!(cfg.take_rx_buffer().is_some());
         assert!(cfg.take_tx_buffer().is_some());
         assert!(!cfg.is_buffer_set());
+    }
+
+    // set_datalogger_buffer is callable without unsafe given a &'static mut [u8]
+    #[cfg(feature = "datalogging")]
+    #[test]
+    fn set_datalogger_buffer_is_safe() {
+        let buf: &'static mut [u8] = std::boxed::Box::leak(std::boxed::Box::new([0u8; 64]));
+        let buf_addr = buf.as_ptr();
+        let mut cfg = Config::new();
+        assert!(!cfg.is_datalogging_configured());
+        cfg.set_datalogger_buffer(buf, None);
+        assert!(cfg.is_datalogging_configured());
+
+        let (ptr, len, cb) = cfg.take_datalogger_buf().unwrap();
+        assert_eq!(ptr.cast_const(), buf_addr);
+        assert_eq!(len, 64);
+        assert!(cb.is_none());
+        assert!(!cfg.is_datalogging_configured());
+        assert!(cfg.take_datalogger_buf().is_none());
+    }
+
+    // An empty datalogger buffer is treated as not configured
+    #[cfg(feature = "datalogging")]
+    #[test]
+    fn empty_datalogger_buffer_is_not_configured() {
+        let buf: &'static mut [u8] = std::boxed::Box::leak(std::boxed::Box::new([0u8; 0]));
+        let mut cfg = Config::new();
+        cfg.set_datalogger_buffer(buf, None);
+        assert!(!cfg.is_datalogging_configured());
+        assert!(cfg.take_datalogger_buf().is_none());
     }
 
     #[cfg(feature = "protected_regions")]

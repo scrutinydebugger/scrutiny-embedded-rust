@@ -125,6 +125,9 @@ impl DataloggerHost for RpvHost {
 // ── MainHandler ───────────────────────────────────────────────────────────────
 
 /// Top-level Scrutiny handler. Owns the communication buffers and drives the protocol.
+///
+/// Meant to be a global instance that lives for the whole program. It must not be moved
+/// after its first `process()` call: loops hold the address of the datalogger it owns.
 pub struct MainHandler<'rxbuf, 'txbuf> {
     comm: CommHandler,
     rx_buf: &'rxbuf mut [u8],
@@ -157,6 +160,9 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
     /// Consumes `config` and returns an initialised handler, or `None` if the config is invalid.
     ///
     /// Must be called before the loop handlers start running: it clears their IPC state.
+    ///
+    /// The returned handler is meant to live for the whole program. Do not move it after
+    /// its first `process()` call: loops hold the address of the datalogger it owns.
     #[must_use]
     pub fn new(mut config: Config<'rxbuf, 'txbuf>) -> Option<Self> {
         let rx_buf = config.take_rx_buffer()?;
@@ -184,7 +190,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             let has_dl_loop = loops.is_some_and(|l| l.iter().any(|loop_handler| loop_handler.datalogging_allowed()));
             if let Some((buf, len, cb)) = config.take_datalogger_buf() {
                 if has_dl_loop {
-                    // Safety: caller guarantees buf is valid for len bytes and outlives this handler.
+                    // Safety: buf comes from a `&'static mut [u8]` moved out of the config, so it is valid for len bytes, exclusive and never freed.
                     Some(unsafe { DataLoggerCell::new(buf, len, cb) })
                 } else {
                     None

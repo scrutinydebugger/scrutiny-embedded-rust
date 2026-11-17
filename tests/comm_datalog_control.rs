@@ -282,15 +282,14 @@ fn send_and_recv_with_release(h: &mut MainHandler<'_, '_>, loop_handler: &impl T
 fn make_handler_with_loops<'rx, 'tx>(
     rx: &'rx mut [u8],
     tx: &'tx mut [u8],
-    dl_buf_ptr: *mut u8,
-    dl_buf_len: usize,
+    dl_buf: &'static mut [u8],
     loops: &'static [&'static LoopHandler],
 ) -> MainHandler<'rx, 'tx> {
     let mut cfg = Config::new();
     cfg.set_buffers(rx, tx);
     cfg.set_loops(loops);
     cfg.set_published_values(&TEST_RPVS, Some(rpv_read_callback), None);
-    unsafe { cfg.set_datalogger_buffer(dl_buf_ptr, dl_buf_len, None) };
+    cfg.set_datalogger_buffer(dl_buf, None);
     MainHandler::new(cfg).unwrap()
 }
 
@@ -346,7 +345,7 @@ fn test_get_setup() {
     static mut DL_BUF_GET_SETUP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 256];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_GET_SETUP).cast(), DATALOG_BUFFER_SIZE, &LOOPS_GET_SETUP);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_GET_SETUP) }, &LOOPS_GET_SETUP);
     connect(&mut h);
 
     let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetSetup as u8, &[]);
@@ -371,7 +370,7 @@ fn test_configure_valid() {
     static mut DL_BUF_CONFIGURE_VALID: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_CONFIGURE_VALID).cast(), DATALOG_BUFFER_SIZE, &LOOPS_CONFIGURE_VALID);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_CONFIGURE_VALID) }, &LOOPS_CONFIGURE_VALID);
     connect(&mut h);
 
     let cfg = get_valid_reference_config();
@@ -389,7 +388,7 @@ fn test_configure_bad_loop_id() {
     static mut DL_BUF_BAD_LOOP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_BAD_LOOP).cast(), DATALOG_BUFFER_SIZE, &LOOPS_BAD_LOOP);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_LOOP) }, &LOOPS_BAD_LOOP);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -408,7 +407,7 @@ fn test_configure_no_datalogging_support() {
     static mut DL_BUF_NO_DL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_NO_DL).cast(), DATALOG_BUFFER_SIZE, &LOOPS_NO_DL);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_NO_DL) }, &LOOPS_NO_DL);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -427,7 +426,7 @@ fn test_configure_item_count_overflow() {
     static mut DL_BUF_OVERFLOW: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_OVERFLOW).cast(), DATALOG_BUFFER_SIZE, &LOOPS_OVERFLOW);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OVERFLOW) }, &LOOPS_OVERFLOW);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -449,7 +448,7 @@ fn test_configure_operand_count_overflow() {
     static mut DL_BUF_OP_OVERFLOW: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_OP_OVERFLOW).cast(), DATALOG_BUFFER_SIZE, &LOOPS_OP_OVERFLOW);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OP_OVERFLOW) }, &LOOPS_OP_OVERFLOW);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -471,7 +470,7 @@ fn test_configure_operand_count_mismatch() {
     static mut DL_BUF_OP_MISMATCH: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_OP_MISMATCH).cast(), DATALOG_BUFFER_SIZE, &LOOPS_OP_MISMATCH);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OP_MISMATCH) }, &LOOPS_OP_MISMATCH);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -491,7 +490,7 @@ fn test_bad_decimation() {
     static mut DL_BUF_BAD_DEC: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_BAD_DEC).cast(), DATALOG_BUFFER_SIZE, &LOOPS_BAD_DEC);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_DEC) }, &LOOPS_BAD_DEC);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -510,7 +509,7 @@ fn test_configure_bad_operands() {
     static mut DL_BUF_BAD_OP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_BAD_OP).cast(), DATALOG_BUFFER_SIZE, &LOOPS_BAD_OP);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_OP) }, &LOOPS_BAD_OP);
     connect(&mut h);
 
     let bad_values: [f32; 4] = [
@@ -538,7 +537,7 @@ fn test_configure_operand_bad_rpv() {
     static mut DL_BUF_BAD_RPV: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_BAD_RPV).cast(), DATALOG_BUFFER_SIZE, &LOOPS_BAD_RPV);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_RPV) }, &LOOPS_BAD_RPV);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -569,7 +568,7 @@ fn test_configure_signal_in_forbidden_region() {
     cfg.set_loops(&LOOPS_FORBIDDEN_SIG);
     cfg.set_published_values(&TEST_RPVS, Some(rpv_read_callback), None);
     cfg.set_forbidden_address_range(&FORBIDDEN_RANGES_SIG);
-    unsafe { cfg.set_datalogger_buffer(DL_BUF_FORBIDDEN_SIG.as_mut_ptr(), DL_BUF_FORBIDDEN_SIG.len(), None) };
+    cfg.set_datalogger_buffer(unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_FORBIDDEN_SIG) }, None);
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
@@ -604,7 +603,7 @@ fn test_configure_operand_var_in_forbidden_region() {
     cfg.set_loops(&LOOPS_FORBIDDEN_VAR);
     cfg.set_published_values(&TEST_RPVS, Some(rpv_read_callback), None);
     cfg.set_forbidden_address_range(&FORBIDDEN_RANGES_VAR);
-    unsafe { cfg.set_datalogger_buffer(DL_BUF_FORBIDDEN_VAR.as_mut_ptr(), DL_BUF_FORBIDDEN_VAR.len(), None) };
+    cfg.set_datalogger_buffer(unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_FORBIDDEN_VAR) }, None);
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
@@ -639,7 +638,7 @@ fn test_configure_operand_varbit_in_forbidden_region() {
     cfg.set_loops(&LOOPS_FORBIDDEN_VARBIT);
     cfg.set_published_values(&TEST_RPVS, Some(rpv_read_callback), None);
     cfg.set_forbidden_address_range(&FORBIDDEN_RANGES_VARBIT);
-    unsafe { cfg.set_datalogger_buffer(DL_BUF_FORBIDDEN_VARBIT.as_mut_ptr(), DL_BUF_FORBIDDEN_VARBIT.len(), None) };
+    cfg.set_datalogger_buffer(unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_FORBIDDEN_VARBIT) }, None);
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
@@ -677,7 +676,7 @@ fn test_configure_operand_varbit_almost_in_forbidden_region() {
     cfg.set_loops(&LOOPS_ALMOST_FORBIDDEN);
     cfg.set_published_values(&TEST_RPVS, Some(rpv_read_callback), None);
     cfg.set_forbidden_address_range(&FORBIDDEN_RANGES_ALMOST);
-    unsafe { cfg.set_datalogger_buffer(DL_BUF_ALMOST_FORBIDDEN.as_mut_ptr(), DL_BUF_ALMOST_FORBIDDEN.len(), None) };
+    cfg.set_datalogger_buffer(unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ALMOST_FORBIDDEN) }, None);
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
@@ -703,7 +702,7 @@ fn test_configure_unknown_condition() {
     static mut DL_BUF_UNK_COND: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_UNK_COND).cast(), DATALOG_BUFFER_SIZE, &LOOPS_UNK_COND);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_UNK_COND) }, &LOOPS_UNK_COND);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -723,7 +722,7 @@ fn test_configure_operand_var_sized_boolean_rejected() {
     static mut DL_BUF_VAR_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_VAR_SIZED_BOOL).cast(), DATALOG_BUFFER_SIZE, &LOOPS_VAR_SIZED_BOOL);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_VAR_SIZED_BOOL) }, &LOOPS_VAR_SIZED_BOOL);
     connect(&mut h);
 
     for datatype in [0x31u8, 0x32, 0x33] {
@@ -749,7 +748,7 @@ fn test_configure_operand_varbit_sized_boolean_rejected() {
     static mut DL_BUF_VARBIT_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_VARBIT_SIZED_BOOL).cast(), DATALOG_BUFFER_SIZE, &LOOPS_VARBIT_SIZED_BOOL);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_VARBIT_SIZED_BOOL) }, &LOOPS_VARBIT_SIZED_BOOL);
     connect(&mut h);
 
     for datatype in [0x31u8, 0x32, 0x33] {
@@ -776,7 +775,7 @@ fn test_configure_loggable_bad_rpv() {
     static mut DL_BUF_LOGGABLE_BAD_RPV: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_LOGGABLE_BAD_RPV).cast(), DATALOG_BUFFER_SIZE, &LOOPS_LOGGABLE_BAD_RPV);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_LOGGABLE_BAD_RPV) }, &LOOPS_LOGGABLE_BAD_RPV);
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -796,7 +795,7 @@ fn test_owner_mechanism() {
     let mut rx = [0u8; 256];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
     let mut tx = vec![0u8; tx_size];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_OWNER).cast(), DATALOG_BUFFER_SIZE, &LOOPS_OWNER);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OWNER) }, &LOOPS_OWNER);
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -858,7 +857,7 @@ fn test_arm_trigger_not_configured() {
     static mut DL_BUF_ARM_NOT_CFG: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_ARM_NOT_CFG).cast(), DATALOG_BUFFER_SIZE, &LOOPS_ARM_NOT_CFG);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ARM_NOT_CFG) }, &LOOPS_ARM_NOT_CFG);
     connect(&mut h);
 
     let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ArmTrigger as u8, &[]);
@@ -876,7 +875,7 @@ fn test_arm_disarm_trigger_ok() {
     static mut DL_BUF_ARM_DISARM: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_ARM_DISARM).cast(), DATALOG_BUFFER_SIZE, &LOOPS_ARM_DISARM);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ARM_DISARM) }, &LOOPS_ARM_DISARM);
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -924,7 +923,7 @@ fn test_get_status() {
     let mut rx = [0u8; 512];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
     let mut tx = vec![0u8; tx_size];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_GET_STATUS).cast(), DATALOG_BUFFER_SIZE, &LOOPS_GET_STATUS);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_GET_STATUS) }, &LOOPS_GET_STATUS);
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -964,7 +963,7 @@ fn test_get_acquisition_metadata() {
     let mut rx = [0u8; 512];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
     let mut tx = vec![0u8; tx_size];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_META).cast(), DATALOG_BUFFER_SIZE, &LOOPS_META);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_META) }, &LOOPS_META);
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -1006,7 +1005,7 @@ fn test_read_acquisition_no_data_available() {
     static mut DL_BUF_READ_NO_DATA: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_READ_NO_DATA).cast(), DATALOG_BUFFER_SIZE, &LOOPS_READ_NO_DATA);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_NO_DATA) }, &LOOPS_READ_NO_DATA);
     connect(&mut h);
 
     let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ReadAcquisition as u8, &[]);
@@ -1026,7 +1025,7 @@ fn test_read_acquisition_one_transfer() {
     // TX must be large enough to hold the entire buffer in one frame
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9 + 64;
     let mut tx = vec![0u8; tx_size];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_READ_ONE).cast(), DATALOG_BUFFER_SIZE, &LOOPS_READ_ONE);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_ONE) }, &LOOPS_READ_ONE);
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -1080,7 +1079,7 @@ fn test_read_acquisition_multiple_transfers() {
     let mut rx = [0u8; 512];
     // Small TX buffer to force multiple transfers
     let mut tx = [0u8; TX_LEN];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_READ_MULTI).cast(), 1000, &LOOPS_READ_MULTI);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_MULTI) }, &LOOPS_READ_MULTI);
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -1160,7 +1159,7 @@ fn test_reset_datalogger() {
     static mut DL_BUF_RESET: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_RESET).cast(), DATALOG_BUFFER_SIZE, &LOOPS_RESET);
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RESET) }, &LOOPS_RESET);
     connect(&mut h);
 
     let loop0 = &LOOP1;

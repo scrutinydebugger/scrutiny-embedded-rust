@@ -59,8 +59,8 @@ fn compare_category(vt: VariableType) -> CompareCategory {
 /// Generic relational comparison applied to a pair of `AnyValAndTypePair` values.
 /// Expects both pairs to have been run through `convert_to_compare_type`.
 fn relational_compare(
-    op0: &AnyValAndTypePair,
-    op1: &AnyValAndTypePair,
+    op0: AnyValAndTypePair,
+    op1: AnyValAndTypePair,
     cmp: fn(f32, f32) -> bool,
     cmp_uint: fn(crate::types::UintBiggest, crate::types::UintBiggest) -> bool,
     cmp_signed: fn(crate::types::IntBiggest, crate::types::IntBiggest) -> bool,
@@ -101,14 +101,14 @@ const fn clamp_uint_to_int_max(v: crate::types::UintBiggest) -> crate::types::In
 /// # Safety
 /// Caller must have called `convert_to_compare_type` and confirmed `valtype == BIGGEST_SINT`.
 #[inline]
-const unsafe fn read_sint(p: &AnyValAndTypePair) -> crate::types::IntBiggest {
+const unsafe fn read_sint(p: AnyValAndTypePair) -> crate::types::IntBiggest {
     crate::tools::read_biggest_sint(&p.val)
 }
 
 /// # Safety
 /// Caller must have called `convert_to_compare_type` and confirmed `valtype == BIGGEST_UINT`.
 #[inline]
-const unsafe fn read_uint(p: &AnyValAndTypePair) -> crate::types::UintBiggest {
+const unsafe fn read_uint(p: AnyValAndTypePair) -> crate::types::UintBiggest {
     crate::tools::read_biggest_uint(&p.val)
 }
 
@@ -116,7 +116,7 @@ const unsafe fn read_uint(p: &AnyValAndTypePair) -> crate::types::UintBiggest {
 /// Caller must have called `convert_to_compare_type` and confirmed `valtype == BIGGEST_SINT`.
 #[allow(clippy::cast_precision_loss)]
 #[inline]
-const unsafe fn read_sint_as_float(p: &AnyValAndTypePair) -> f32 {
+const unsafe fn read_sint_as_float(p: AnyValAndTypePair) -> f32 {
     crate::tools::read_biggest_sint(&p.val) as f32
 }
 
@@ -124,7 +124,7 @@ const unsafe fn read_sint_as_float(p: &AnyValAndTypePair) -> f32 {
 /// Caller must have called `convert_to_compare_type` and confirmed `valtype == BIGGEST_UINT`.
 #[allow(clippy::cast_precision_loss)]
 #[inline]
-const unsafe fn read_uint_as_float(p: &AnyValAndTypePair) -> f32 {
+const unsafe fn read_uint_as_float(p: AnyValAndTypePair) -> f32 {
     crate::tools::read_biggest_uint(&p.val) as f32
 }
 
@@ -139,7 +139,7 @@ pub fn equal_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]) ->
     if ops.len() < 2 {
         return false;
     }
-    relational_compare(&ops[0], &ops[1], |a, b| a == b, |a, b| a == b, |a, b| a == b)
+    relational_compare(ops[0], ops[1], |a, b| a == b, |a, b| a == b, |a, b| a == b)
 }
 
 #[allow(clippy::float_cmp)]
@@ -147,35 +147,35 @@ pub fn not_equal_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]
     if ops.len() < 2 {
         return false;
     }
-    relational_compare(&ops[0], &ops[1], |a, b| a != b, |a, b| a != b, |a, b| a != b)
+    relational_compare(ops[0], ops[1], |a, b| a != b, |a, b| a != b, |a, b| a != b)
 }
 
 pub fn greater_than_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]) -> bool {
     if ops.len() < 2 {
         return false;
     }
-    relational_compare(&ops[0], &ops[1], |a, b| a > b, |a, b| a > b, |a, b| a > b)
+    relational_compare(ops[0], ops[1], |a, b| a > b, |a, b| a > b, |a, b| a > b)
 }
 
 pub fn greater_or_equal_than_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]) -> bool {
     if ops.len() < 2 {
         return false;
     }
-    relational_compare(&ops[0], &ops[1], |a, b| a >= b, |a, b| a >= b, |a, b| a >= b)
+    relational_compare(ops[0], ops[1], |a, b| a >= b, |a, b| a >= b, |a, b| a >= b)
 }
 
 pub fn less_than_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]) -> bool {
     if ops.len() < 2 {
         return false;
     }
-    relational_compare(&ops[0], &ops[1], |a, b| a < b, |a, b| a < b, |a, b| a < b)
+    relational_compare(ops[0], ops[1], |a, b| a < b, |a, b| a < b, |a, b| a < b)
 }
 
 pub fn less_or_equal_than_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]) -> bool {
     if ops.len() < 2 {
         return false;
     }
-    relational_compare(&ops[0], &ops[1], |a, b| a <= b, |a, b| a <= b, |a, b| a <= b)
+    relational_compare(ops[0], ops[1], |a, b| a <= b, |a, b| a <= b, |a, b| a <= b)
 }
 
 pub const fn change_more_than_reset(data: &mut ConditionSharedData) {
@@ -190,15 +190,15 @@ pub fn change_more_than_eval(data: &mut ConditionSharedData, ops: &[AnyValAndTyp
     // Operand 1 is the threshold delta (always treated as float for simplicity).
     let delta: f32 = match compare_category(ops[1].valtype) {
         CompareCategory::Float => unsafe { ops[1].val.float32 },
-        CompareCategory::Uint => unsafe { read_uint_as_float(&ops[1]) },
-        CompareCategory::Sint => unsafe { read_sint_as_float(&ops[1]) },
+        CompareCategory::Uint => unsafe { read_uint_as_float(ops[1]) },
+        CompareCategory::Sint => unsafe { read_sint_as_float(ops[1]) },
         CompareCategory::Unknown => return false,
     };
 
     let outval = if data.cmt_initialized {
         match compare_category(ops[0].valtype) {
             CompareCategory::Uint => {
-                let cur = unsafe { read_uint(&ops[0]) };
+                let cur = unsafe { read_uint(ops[0]) };
                 let prev = crate::tools::read_biggest_uint(&data.cmt_previous_val);
                 // Cast: f32 → signed delta → unsigned so wrapping_add subtracts when delta < 0.
                 #[allow(clippy::cast_possible_truncation)]
@@ -210,7 +210,7 @@ pub fn change_more_than_eval(data: &mut ConditionSharedData, ops: &[AnyValAndTyp
                 }
             }
             CompareCategory::Sint => {
-                let cur = unsafe { read_sint(&ops[0]) };
+                let cur = unsafe { read_sint(ops[0]) };
                 let prev = crate::tools::read_biggest_sint(&data.cmt_previous_val);
                 #[allow(clippy::cast_possible_truncation)]
                 let threshold = prev.wrapping_add(delta as crate::types::IntBiggest);
@@ -246,19 +246,75 @@ pub fn is_within_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]
     if ops.len() < 3 {
         return false;
     }
-    let as_float = |p: &AnyValAndTypePair| match compare_category(p.valtype) {
+    let as_float = |p: AnyValAndTypePair| match compare_category(p.valtype) {
         CompareCategory::Float => unsafe { p.val.float32 },
         CompareCategory::Uint => unsafe { read_uint_as_float(p) },
         CompareCategory::Sint => unsafe { read_sint_as_float(p) },
         CompareCategory::Unknown => f32::NAN,
     };
-    let v0 = as_float(&ops[0]);
-    let v1 = as_float(&ops[1]);
-    let margin = as_float(&ops[2]).abs();
+    let v0 = as_float(ops[0]);
+    let v1 = as_float(ops[1]);
+    let margin = as_float(ops[2]).abs();
     (v0 - v1).abs() <= margin
 }
 
 // ── Condition LUT ─────────────────────────────────────────────────────────────
+
+use crate::datalogging::types::SupportedTriggerConditions;
+
+/// Returns the `ActiveCondition` matching `cond`, or `None` for an unknown value.
+#[must_use]
+pub fn active_condition_for(cond: SupportedTriggerConditions) -> ActiveCondition {
+    // Keep in sync with `SupportedTriggerConditions` enum order.
+    static LUT: [ActiveCondition; 9] = [
+        ActiveCondition {
+            eval_fn: always_true_eval,
+            reset_fn: None,
+            operand_count: 0,
+        },
+        ActiveCondition {
+            eval_fn: equal_eval,
+            reset_fn: None,
+            operand_count: 2,
+        },
+        ActiveCondition {
+            eval_fn: not_equal_eval,
+            reset_fn: None,
+            operand_count: 2,
+        },
+        ActiveCondition {
+            eval_fn: less_than_eval,
+            reset_fn: None,
+            operand_count: 2,
+        },
+        ActiveCondition {
+            eval_fn: less_or_equal_than_eval,
+            reset_fn: None,
+            operand_count: 2,
+        },
+        ActiveCondition {
+            eval_fn: greater_than_eval,
+            reset_fn: None,
+            operand_count: 2,
+        },
+        ActiveCondition {
+            eval_fn: greater_or_equal_than_eval,
+            reset_fn: None,
+            operand_count: 2,
+        },
+        ActiveCondition {
+            eval_fn: change_more_than_eval,
+            reset_fn: Some(change_more_than_reset),
+            operand_count: 2,
+        },
+        ActiveCondition {
+            eval_fn: is_within_eval,
+            reset_fn: None,
+            operand_count: 3,
+        },
+    ];
+    LUT[cond as usize]
+}
 
 #[cfg(test)]
 mod tests {
@@ -559,60 +615,4 @@ mod tests {
         assert!(!is_within_eval(&mut cd, &[fp(10.0), fp(8.99), fp(1.0)])); // 1.01 > 1
         assert!(is_within_eval(&mut cd, &[fp(10.0), fp(9.0), fp(1.0)])); // 1.0 <= 1
     }
-}
-
-use crate::datalogging::types::SupportedTriggerConditions;
-
-/// Returns the `ActiveCondition` matching `cond`, or `None` for an unknown value.
-#[must_use]
-pub fn active_condition_for(cond: SupportedTriggerConditions) -> ActiveCondition {
-    // Keep in sync with `SupportedTriggerConditions` enum order.
-    static LUT: [ActiveCondition; 9] = [
-        ActiveCondition {
-            eval_fn: always_true_eval,
-            reset_fn: None,
-            operand_count: 0,
-        },
-        ActiveCondition {
-            eval_fn: equal_eval,
-            reset_fn: None,
-            operand_count: 2,
-        },
-        ActiveCondition {
-            eval_fn: not_equal_eval,
-            reset_fn: None,
-            operand_count: 2,
-        },
-        ActiveCondition {
-            eval_fn: less_than_eval,
-            reset_fn: None,
-            operand_count: 2,
-        },
-        ActiveCondition {
-            eval_fn: less_or_equal_than_eval,
-            reset_fn: None,
-            operand_count: 2,
-        },
-        ActiveCondition {
-            eval_fn: greater_than_eval,
-            reset_fn: None,
-            operand_count: 2,
-        },
-        ActiveCondition {
-            eval_fn: greater_or_equal_than_eval,
-            reset_fn: None,
-            operand_count: 2,
-        },
-        ActiveCondition {
-            eval_fn: change_more_than_eval,
-            reset_fn: Some(change_more_than_reset),
-            operand_count: 2,
-        },
-        ActiveCondition {
-            eval_fn: is_within_eval,
-            reset_fn: None,
-            operand_count: 3,
-        },
-    ];
-    LUT[cond as usize]
 }

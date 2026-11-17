@@ -1,4 +1,6 @@
 #![cfg(feature = "datalogging")]
+// Test values mirror the C++ tests (3.1415926).
+#![allow(clippy::approx_constant)]
 
 use scrutiny_embedded_rust::datalogging::{convert_to_compare_type, AnyValAndTypePair};
 use scrutiny_embedded_rust::tools::{

@@ -1,4 +1,6 @@
 #![cfg(feature = "datalogging")]
+// Test values mirror the C++ tests (3.1415926).
+#![allow(clippy::approx_constant)]
 
 use scrutiny_embedded_rust::build_config::{DATALOGGING_MAX_SIGNAL, REQUEST_MAX_PROCESS_TIME_US};
 use scrutiny_embedded_rust::config::Config;
@@ -120,8 +122,7 @@ fn encode_usize_be(val: usize) -> Vec<u8> {
 }
 
 fn encode_configure_payload(cfg: &DlConfig) -> Vec<u8> {
-    let mut buf = Vec::new();
-    buf.push(cfg.loop_id);
+    let mut buf = vec![cfg.loop_id];
     buf.extend_from_slice(&cfg.config_id.to_be_bytes());
     buf.extend_from_slice(&cfg.decimation.to_be_bytes());
     buf.push(cfg.probe_location);
@@ -1051,7 +1052,7 @@ fn test_owner_mechanism() {
     static LOOPS_OWNER: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OWNER: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
-    let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
+    let tx_size = DATALOG_BUFFER_SIZE + 8 + 9;
     let mut tx = vec![0u8; tx_size];
     let mut h = make_handler_with_loops(
         &mut rx,
@@ -1210,7 +1211,7 @@ fn test_get_status() {
     static LOOPS_GET_STATUS: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_GET_STATUS: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
-    let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
+    let tx_size = DATALOG_BUFFER_SIZE + 8 + 9;
     let mut tx = vec![0u8; tx_size];
     let mut h = make_handler_with_loops(
         &mut rx,
@@ -1267,7 +1268,7 @@ fn test_get_acquisition_metadata() {
     static LOOPS_META: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_META: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
-    let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
+    let tx_size = DATALOG_BUFFER_SIZE + 8 + 9;
     let mut tx = vec![0u8; tx_size];
     let mut h = make_handler_with_loops(
         &mut rx,
@@ -1355,7 +1356,7 @@ fn test_read_acquisition_one_transfer() {
     static mut DL_BUF_READ_ONE: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     // TX must be large enough to hold the entire buffer in one frame
-    let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9 + 64;
+    let tx_size = DATALOG_BUFFER_SIZE + 8 + 9 + 64;
     let mut tx = vec![0u8; tx_size];
     let mut h = make_handler_with_loops(
         &mut rx,
@@ -1767,7 +1768,7 @@ fn check_counter_entries(data: &[u8]) {
     let mut expected_offset: Option<u32> = None;
     let mut first_ts: Option<u32> = None;
     let mut last_ts = 0u32;
-    for (i, entry) in data.chunks_exact(8).enumerate() {
+    for (i, entry) in data.as_chunks::<8>().0.iter().enumerate() {
         let ts = u32::from_be_bytes([entry[0], entry[1], entry[2], entry[3]]);
         let val = u32::from_ne_bytes([entry[4], entry[5], entry[6], entry[7]]);
         let offset = val.wrapping_sub(ts);

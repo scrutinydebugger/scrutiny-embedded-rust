@@ -1,5 +1,5 @@
 #!/bin/bash
 set -euo pipefail
 
-cargo test
+cargo test --features std
 cargo clippy --all-features -- -D warnings

@@ -139,8 +139,9 @@ fn encode_usize_be(val: usize) -> Vec<u8> {
 
 // Trigger when COUNTER > THRESHOLD on loop 0, log the loop time and COUNTER.
 fn encode_threshold_configure_payload() -> Vec<u8> {
-    let mut buf = Vec::new();
-    buf.push(0); // loop_id
+    let mut buf = vec![
+        0, // loop_id
+    ];
     buf.extend_from_slice(&CONFIG_ID.to_be_bytes());
     buf.extend_from_slice(&1u16.to_be_bytes()); // decimation
     buf.push(PROBE_LOCATION);

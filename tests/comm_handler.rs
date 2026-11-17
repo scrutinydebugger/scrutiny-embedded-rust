@@ -8,11 +8,7 @@ use scrutiny_embedded_rust::tools::crc32;
 /// Builds a request frame: cmd(1) + subfn(1) + len_hi(1) + len_lo(1) + data + crc32(4).
 fn make_request(cmd: u8, subfn: u8, payload: &[u8]) -> Vec<u8> {
     let len = payload.len() as u16;
-    let mut frame = Vec::new();
-    frame.push(cmd);
-    frame.push(subfn);
-    frame.push((len >> 8) as u8);
-    frame.push((len & 0xFF) as u8);
+    let mut frame = vec![cmd, subfn, (len >> 8) as u8, (len & 0xFF) as u8];
     frame.extend_from_slice(payload);
     let crc = crc32(&frame, 0);
     frame.push((crc >> 24) as u8);
@@ -26,12 +22,7 @@ fn make_request(cmd: u8, subfn: u8, payload: &[u8]) -> Vec<u8> {
 fn make_expected_response(cmd: u8, subfn: u8, code: u8, payload: &[u8]) -> Vec<u8> {
     let len = payload.len() as u16;
     let cmd_out = cmd | 0x80;
-    let mut frame = Vec::new();
-    frame.push(cmd_out);
-    frame.push(subfn);
-    frame.push(code);
-    frame.push((len >> 8) as u8);
-    frame.push((len & 0xFF) as u8);
+    let mut frame = vec![cmd_out, subfn, code, (len >> 8) as u8, (len & 0xFF) as u8];
     frame.extend_from_slice(payload);
     let crc = crc32(&frame, 0);
     frame.push((crc >> 24) as u8);
@@ -47,9 +38,9 @@ fn make_comm_buffers() -> ([u8; 128], [u8; 128]) {
 
 #[test]
 fn test_consecutive_send() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (rx, mut tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
 
     let payload = [0x11u8, 0x22, 0x33];
     let expected = make_expected_response(0x01, 0x02, 0x03, &payload);
@@ -99,9 +90,9 @@ fn test_consecutive_send() {
 #[test]
 // Port of TestHeartbeatTimeoutExpire
 fn test_heartbeat_timeout_expire() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (rx, tx) = make_comm_buffers();
     let mut tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
 
     assert!(!comm.is_connected());
     comm.connect(&tb);
@@ -135,9 +126,9 @@ fn test_heartbeat_timeout_expire() {
 #[test]
 // Port of TestConnectDisconnectBehaviour
 fn test_connect_disconnect() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let mut tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
 
     assert!(!comm.is_connected());
     comm.connect(&tb);
@@ -179,9 +170,9 @@ fn test_connect_disconnect() {
 #[test]
 // Complements TestConnectDisconnectBehaviour: double connect, session ID sequence from the seed, drop while disconnected
 fn test_connect_disconnect_session_sequence() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0x1234_5678);
+    let mut comm = CommHandler::new(&rx, &tx, 0x1234_5678);
 
     assert!(comm.connect(&tb));
     assert_eq!(comm.get_session_id(), 0x1234_5678);
@@ -206,9 +197,9 @@ fn test_connect_disconnect_session_sequence() {
 
 #[test]
 fn test_rx_framing_valid() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     comm.connect(&tb);
 
     let payload = [0xAAu8, 0xBB, 0xCC];
@@ -225,9 +216,9 @@ fn test_rx_framing_valid() {
 
 #[test]
 fn test_rx_bad_crc_no_request() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     comm.connect(&tb);
 
     let mut frame = make_request(0x01, 0x01, &[]);
@@ -239,9 +230,9 @@ fn test_rx_bad_crc_no_request() {
 
 #[test]
 fn test_rx_invalid_command_bit() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let mut tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     comm.connect(&tb);
 
     // Bit 7 set means it's a response frame, not a valid request
@@ -260,9 +251,9 @@ fn test_rx_invalid_command_bit() {
 
 #[test]
 fn test_rx_timeout_resets_fsm() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let mut tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     comm.connect(&tb);
 
     let frame = make_request(0x01, 0x01, &[]);
@@ -280,9 +271,9 @@ fn test_rx_timeout_resets_fsm() {
 
 #[test]
 fn test_rx_overflow() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     comm.connect(&tb);
 
     // Payload larger than the 128-byte RX buffer
@@ -296,9 +287,9 @@ fn test_rx_overflow() {
 
 #[test]
 fn test_rx_chunked_delivery() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     comm.connect(&tb);
 
     let payload = [1u8, 2, 3, 4, 5];
@@ -318,9 +309,9 @@ fn test_rx_chunked_delivery() {
 
 #[test]
 fn test_discover_without_session() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     // No connect() — session inactive
 
     let frame = make_request(
@@ -338,9 +329,9 @@ fn test_discover_without_session() {
 
 #[test]
 fn test_connect_request_without_session() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
 
     let frame = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &[]);
     comm.receive_data(&frame, &mut rx, &tb);
@@ -349,9 +340,9 @@ fn test_connect_request_without_session() {
 
 #[test]
 fn test_non_discover_dropped_without_session() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     // No connect()
 
     let frame = make_request(CommandId::GetInfo as u8, 0x01, &[]);
@@ -362,9 +353,9 @@ fn test_non_discover_dropped_without_session() {
 
 #[test]
 fn test_pop_data_partial_reads() {
-    let (mut rx, mut tx) = make_comm_buffers();
+    let (rx, mut tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
 
     let payload = [0x11u8, 0x22, 0x33];
     let expected = make_expected_response(0x01, 0x02, 0x00, &payload);
@@ -390,7 +381,7 @@ fn test_pop_data_partial_reads() {
 fn test_disabled_handler_rejects_rx_and_tx() {
     let (mut rx, mut tx) = make_comm_buffers();
     let tb = Timebase::new();
-    let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
+    let mut comm = CommHandler::new(&rx, &tx, 0);
     comm.disable(&tb);
 
     assert!(!comm.is_enabled());

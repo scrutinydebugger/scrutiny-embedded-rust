@@ -9,11 +9,7 @@ use scrutiny_embedded_rust::tools::crc32;
 
 fn make_request(cmd: u8, subfn: u8, payload: &[u8]) -> Vec<u8> {
     let len = payload.len() as u16;
-    let mut frame = Vec::new();
-    frame.push(cmd);
-    frame.push(subfn);
-    frame.push((len >> 8) as u8);
-    frame.push((len & 0xFF) as u8);
+    let mut frame = vec![cmd, subfn, (len >> 8) as u8, (len & 0xFF) as u8];
     frame.extend_from_slice(payload);
     let crc = crc32(&frame, 0);
     frame.push((crc >> 24) as u8);
@@ -79,7 +75,8 @@ fn test_discover_response_payload() {
 
     // Payload layout: major(1), minor(1), software_id(16), name_len(1), name(name_len)
     let payload_len = u16::from_be_bytes([out[3], out[4]]) as usize;
-    assert!(payload_len >= 2 + SOFTWARE_ID.len() + 1);
+    let header_len = 2 + SOFTWARE_ID.len() + 1; // major, minor, software_id, name_len
+    assert!(payload_len >= header_len);
     assert_eq!(out[5], PROTOCOL_VERSION_MAJOR);
     assert_eq!(out[6], PROTOCOL_VERSION_MINOR);
     assert_eq!(&out[7..7 + SOFTWARE_ID.len()], &SOFTWARE_ID);

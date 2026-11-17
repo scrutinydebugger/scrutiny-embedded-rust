@@ -6,11 +6,7 @@ use scrutiny_embedded_rust::types::{RuntimePublishedValue, VariableType};
 
 fn make_request(cmd: u8, subfn: u8, payload: &[u8]) -> Vec<u8> {
     let len = payload.len() as u16;
-    let mut frame = Vec::new();
-    frame.push(cmd);
-    frame.push(subfn);
-    frame.push((len >> 8) as u8);
-    frame.push((len & 0xFF) as u8);
+    let mut frame = vec![cmd, subfn, (len >> 8) as u8, (len & 0xFF) as u8];
     frame.extend_from_slice(payload);
     let crc = crc32(&frame, 0);
     frame.push((crc >> 24) as u8);

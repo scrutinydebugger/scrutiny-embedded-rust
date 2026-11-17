@@ -16,11 +16,7 @@ const ADDR_SIZE: usize = core::mem::size_of::<*const u8>();
 
 fn make_request(cmd: u8, subfn: u8, payload: &[u8]) -> Vec<u8> {
     let len = payload.len() as u16;
-    let mut frame = Vec::new();
-    frame.push(cmd);
-    frame.push(subfn);
-    frame.push((len >> 8) as u8);
-    frame.push(len as u8);
+    let mut frame = vec![cmd, subfn, (len >> 8) as u8, len as u8];
     frame.extend_from_slice(payload);
     let crc = crc32(&frame, 0);
     frame.push((crc >> 24) as u8);
@@ -498,9 +494,7 @@ fn test_write_invalid_data_length() {
     let mut payload = encode_addr(buf.as_ptr());
     payload.push(0x00);
     payload.push(10); // claims 10 bytes
-    for _ in 0..9 {
-        payload.push(0x00);
-    } // only 9 bytes of data
+    payload.extend_from_slice(&[0x00; 9]); // only 9 bytes of data
 
     let req = make_request(
         CommandId::MemoryControl as u8,
@@ -585,7 +579,7 @@ fn test_write_forbidden_address() {
 
     for i in 0..(buf.len() - window) {
         let write_ptr = unsafe { buf.as_ptr().add(i) };
-        let payload = write_block(write_ptr as *const u8, &write_data);
+        let payload = write_block(write_ptr, &write_data);
         let req = make_request(
             CommandId::MemoryControl as u8,
             MemoryControlSubfn::Write as u8,
@@ -637,7 +631,7 @@ fn test_write_readonly_address() {
 
     for i in 0..(buf.len() - window) {
         let write_ptr = unsafe { buf.as_ptr().add(i) };
-        let payload = write_block(write_ptr as *const u8, &write_data);
+        let payload = write_block(write_ptr, &write_data);
         let req = make_request(
             CommandId::MemoryControl as u8,
             MemoryControlSubfn::Write as u8,
@@ -682,7 +676,7 @@ fn test_write_readonly_containment() {
 
     // Write from 1 byte before the readonly through 1 byte after → 6 bytes.
     let write_ptr = unsafe { buf.as_ptr().add(5) };
-    let payload = write_block(write_ptr as *const u8, &[0xFFu8; 6]);
+    let payload = write_block(write_ptr, &[0xFFu8; 6]);
     let req = make_request(
         CommandId::MemoryControl as u8,
         MemoryControlSubfn::Write as u8,
@@ -832,9 +826,7 @@ fn test_write_masked_invalid_data_length() {
     let mut payload = encode_addr(buf.as_ptr());
     payload.push(0x00);
     payload.push(4); // length = 4
-    for _ in 0..4 {
-        payload.push(0x00);
-    } // only data, no mask
+    payload.extend_from_slice(&[0x00; 4]); // only data, no mask
 
     let req = make_request(
         CommandId::MemoryControl as u8,
@@ -874,7 +866,7 @@ fn test_write_masked_forbidden_address() {
 
     for i in 0..(buf.len() - window) {
         let write_ptr = unsafe { buf.as_ptr().add(i) };
-        let payload = masked_write_block(write_ptr as *const u8, &write_data, &mask);
+        let payload = masked_write_block(write_ptr, &write_data, &mask);
         let req = make_request(
             CommandId::MemoryControl as u8,
             MemoryControlSubfn::WriteMasked as u8,
@@ -1167,10 +1159,11 @@ fn test_read_multiple_rpv_each_type() {
     connect(&mut h);
 
     // Sorted by ID, like the C++ std::map.
-    let mut expected: Vec<(u16, Vec<u8>)> = Vec::new();
-    expected.push((0x9000, vec![0x99]));
-    expected.push((0x9001, vec![0xA5, 0xA5]));
-    expected.push((0x9002, vec![0x99, 0x88, 0x77, 0x66]));
+    let mut expected: Vec<(u16, Vec<u8>)> = vec![
+        (0x9000, vec![0x99]),
+        (0x9001, vec![0xA5, 0xA5]),
+        (0x9002, vec![0x99, 0x88, 0x77, 0x66]),
+    ];
     #[cfg(feature = "support_64bits")]
     expected.push((0x9003, vec![0xFF, 0xFF, 0x11, 0x11, 0x22, 0x22, 0x33, 0x33]));
     expected.push((0x9004, vec![0xC0])); // -64
@@ -1534,11 +1527,12 @@ fn test_write_rpv_all_types() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    let mut entries: Vec<(u16, Vec<u8>)> = Vec::new();
-    entries.push((0x1000, vec![0x55]));
-    entries.push((0x1004, vec![0xC0]));
-    entries.push((0x1001, vec![0xAB, 0xCD]));
-    entries.push((0x1002, vec![0x12, 0x34, 0x56, 0x78]));
+    let mut entries: Vec<(u16, Vec<u8>)> = vec![
+        (0x1000, vec![0x55]),
+        (0x1004, vec![0xC0]),
+        (0x1001, vec![0xAB, 0xCD]),
+        (0x1002, vec![0x12, 0x34, 0x56, 0x78]),
+    ];
     #[cfg(feature = "support_64bits")]
     entries.push((0x1003, vec![0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10]));
     entries.push((0x1005, vec![0x8A, 0xD0]));

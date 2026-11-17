@@ -767,6 +767,14 @@ const fn sign_extend_64(val: u64, bitsize: u32) -> i64 {
 }
 
 #[cfg(test)]
+// Test values mirror the C++ tests (3.1415926), and casts apply to small known test values.
+#[allow(
+    clippy::approx_constant,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::cast_lossless
+)]
 mod tests {
     use super::*;
     use crate::datalogging::types::{
@@ -1371,11 +1379,7 @@ mod tests {
             let trigger_location = entry_count.saturating_sub(lp_after);
             let expected_trigger_loc = ((probe_location as f64 / 255.0) * (entry_count as f64 - 1.0)).round() as usize;
 
-            let diff = if trigger_location >= expected_trigger_loc {
-                trigger_location - expected_trigger_loc
-            } else {
-                expected_trigger_loc - trigger_location
-            };
+            let diff = trigger_location.abs_diff(expected_trigger_loc);
             assert!(
                 diff <= 2,
                 "probe_location={probe_location}: trigger at entry {trigger_location}, expected ≈{expected_trigger_loc} (diff={diff})"

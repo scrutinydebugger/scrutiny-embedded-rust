@@ -363,6 +363,7 @@ mod tests {
         fn read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType, _caller: Option<&'static str>) -> bool {
             true
         }
+        #[allow(clippy::trivially_copy_pass_by_ref)] // Signature imposed by RpvWriteCallback.
         fn write_cb(_rpv: RuntimePublishedValue, _in: &AnyType) -> bool {
             true
         }

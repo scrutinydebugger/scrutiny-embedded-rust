@@ -207,6 +207,11 @@ impl LoopHandler {
     }
 
     /// Clears the IPC channels and the loop-side datalogging state. Called by `MainHandler::new`.
+    // Without datalogging there is nothing to clear, but the call site stays feature-independent.
+    #[cfg_attr(
+        not(feature = "datalogging"),
+        allow(clippy::unused_self, clippy::missing_const_for_fn)
+    )]
     pub(crate) fn init(&self) {
         #[cfg(feature = "datalogging")]
         {

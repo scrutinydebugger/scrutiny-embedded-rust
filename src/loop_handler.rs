@@ -196,6 +196,18 @@ impl LoopHandler {
         &self.loop2main
     }
 
+    /// Clears the IPC channels and the loop-side datalogging state. Called by `MainHandler::new`.
+    pub(crate) fn init(&self) {
+        #[cfg(feature = "datalogging")]
+        {
+            self.main2loop.clear();
+            self.loop2main.clear();
+            // SAFETY: `MainHandler::new` must be called before the loop task runs (or while it is
+            // stopped), so no concurrent `process_common()` accesses `dl_runtime`.
+            unsafe { *self.dl_runtime.get() = LoopDlRuntime::DEFAULT };
+        }
+    }
+
     /// Processing shared by both loop types: advances the timebase, handles IPC messages,
     /// and drives the datalogger state machine when datalogging is enabled.
     pub(crate) fn process_common(&self, timestep: Timediff) {

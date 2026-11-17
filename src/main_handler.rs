@@ -155,6 +155,8 @@ pub struct MainHandler<'rxbuf, 'txbuf> {
 
 impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
     /// Consumes `config` and returns an initialised handler, or `None` if the config is invalid.
+    ///
+    /// Must be called before the loop handlers start running: it clears their IPC state.
     #[must_use]
     pub fn new(mut config: Config<'rxbuf, 'txbuf>) -> Option<Self> {
         let rx_buf = config.take_rx_buffer()?;
@@ -172,6 +174,11 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         let forbidden_ranges = config.forbidden_ranges();
         #[cfg(feature = "protected_regions")]
         let readonly_ranges = config.readonly_ranges();
+        if let Some(loop_array) = loops {
+            for loop_handler in loop_array {
+                loop_handler.init();
+            }
+        }
         #[cfg(feature = "datalogging")]
         let datalogger_cell = {
             let has_dl_loop = loops.is_some_and(|l| l.iter().any(|loop_handler| loop_handler.datalogging_allowed()));
@@ -1280,5 +1287,32 @@ mod tests {
         cfg.set_buffers(&mut rx, &mut tx);
         let handler = MainHandler::new(cfg).unwrap();
         assert!(handler.is_enabled());
+    }
+
+    // A stale loop-to-main message left before MainHandler::new is discarded at init.
+    #[cfg(feature = "datalogging")]
+    #[test]
+    fn init_clears_stale_loop_ipc() {
+        use crate::ipc::{Loop2MainMsg, Loop2MainMsgKind};
+        use crate::loop_handler::FixedFreqLoopHandler;
+
+        static FAST: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100);
+        static LOOPS: [&LoopHandler; 1] = [FAST.handler()];
+
+        FAST.handler().loop2main().send(Loop2MainMsg {
+            kind: Loop2MainMsgKind::OwnershipTaken,
+            ..Loop2MainMsg::DEFAULT
+        });
+        assert!(FAST.handler().loop2main().has_content());
+
+        let mut rx = [0u8; 64];
+        let mut tx = [0u8; 64];
+        let mut cfg = Config::new();
+        cfg.set_buffers(&mut rx, &mut tx);
+        cfg.set_loops(&LOOPS);
+        let mut handler = MainHandler::new(cfg).unwrap();
+        assert!(!FAST.handler().loop2main().has_content());
+        handler.process(0);
+        assert!(!handler.datalogging_ownership_taken());
     }
 }

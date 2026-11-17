@@ -84,6 +84,13 @@ impl<T: Copy, F: AtomicFlag> IpcMessage<T, F> {
         self.flag.store(false);
         Some(val)
     }
+
+    /// Discards any pending message by clearing the flag.
+    // Loop IPC channels only exist with datalogging.
+    #[cfg(any(feature = "datalogging", test))]
+    pub(crate) fn clear(&self) {
+        self.flag.store(false);
+    }
 }
 
 impl<T: Copy> IpcMessage<T, StdAtomicFlag> {
@@ -171,6 +178,16 @@ mod tests {
         msg.send(1);
         msg.send(2);
         assert_eq!(msg.pop(), Some(2));
+        assert_eq!(msg.pop(), None);
+    }
+
+    // clear() discards a pending message.
+    #[test]
+    fn clear_discards_pending_message() {
+        let msg: IpcMessage<u32, StdAtomicFlag> = IpcMessage::new_std(0);
+        msg.send(5);
+        msg.clear();
+        assert!(!msg.has_content());
         assert_eq!(msg.pop(), None);
     }
 

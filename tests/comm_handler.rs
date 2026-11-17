@@ -129,6 +129,7 @@ fn test_heartbeat_timeout_expire() {
     tb.step(1); // push past the deadline
     comm.process(&tb);
     assert!(!comm.is_connected());
+    assert_eq!(comm.get_session_id(), 0);
 }
 
 #[test]
@@ -173,6 +174,34 @@ fn test_connect_disconnect() {
                 // Supply only the last byte of the old frame — must not complete a request
     comm.receive_data(&frame[frame.len() - 1..], &mut rx, &tb);
     assert!(!comm.request_received());
+}
+
+#[test]
+// Complements TestConnectDisconnectBehaviour: double connect, session ID sequence from the seed, drop while disconnected
+fn test_connect_disconnect_session_sequence() {
+    let (mut rx, mut tx) = make_comm_buffers();
+    let tb = Timebase::new();
+    let mut comm = CommHandler::new(&mut rx, &mut tx, 0x1234_5678);
+
+    assert!(comm.connect(&tb));
+    assert_eq!(comm.get_session_id(), 0x1234_5678);
+
+    // A second connect while connected fails and keeps the session
+    assert!(!comm.connect(&tb));
+    assert!(comm.is_connected());
+    assert_eq!(comm.get_session_id(), 0x1234_5678);
+
+    comm.disconnect(&tb);
+    assert!(!comm.is_connected());
+    assert_eq!(comm.get_session_id(), 0);
+
+    // Non-Discover/Connect requests are dropped while disconnected
+    let frame = make_request(CommandId::GetInfo as u8, 0x01, &[]);
+    comm.receive_data(&frame, &mut rx, &tb);
+    assert!(!comm.request_received());
+
+    assert!(comm.connect(&tb));
+    assert_eq!(comm.get_session_id(), 0x1234_5679);
 }
 
 #[test]

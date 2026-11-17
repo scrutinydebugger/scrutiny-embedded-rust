@@ -18,7 +18,7 @@ impl Timebase {
         self.time_100ns = self.time_100ns.wrapping_add(timestep_100ns);
     }
 
-    /// Returns the current time as an opaque snapshot for use with [`elapsed_since`] and [`has_expired`].
+    /// Returns the current time as an opaque snapshot for use with [`elapsed_since`](Self::elapsed_since) and [`has_expired`](Self::has_expired).
     #[must_use]
     pub const fn get_timestamp(&self) -> Timestamp {
         self.time_100ns

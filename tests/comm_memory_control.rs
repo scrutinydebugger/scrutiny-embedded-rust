@@ -1,6 +1,9 @@
 use scrutiny_embedded_rust::config::Config;
 use scrutiny_embedded_rust::main_handler::MainHandler;
-use scrutiny_embedded_rust::protocol::{CommandId, CommControlSubfn, MemoryControlSubfn, ResponseCode, CONNECT_MAGIC};
+use scrutiny_embedded_rust::protocol::{
+    CommandId, CommControlSubfn, MemoryControlSubfn, ResponseCode, CONNECT_MAGIC, MINIMUM_RX_BUFFER_SIZE,
+    MINIMUM_TX_BUFFER_SIZE,
+};
 use scrutiny_embedded_rust::tools::crc32;
 use scrutiny_embedded_rust::types::{AnyType, RuntimePublishedValue, VariableType};
 
@@ -936,6 +939,111 @@ fn test_read_rpv_empty_rpv_list() {
     assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8);
 }
 
+fn rpv_read_each_type_cb(rpv: RuntimePublishedValue, out: &mut AnyType, _caller: Option<&'static str>) -> bool {
+    match (rpv.id, rpv.var_type) {
+        (0x9000, VariableType::Uint8) => out.uint8 = 0x99,
+        (0x9001, VariableType::Uint16) => out.uint16 = 0xA5A5,
+        (0x9002, VariableType::Uint32) => out.uint32 = 0x99887766,
+        (0x9004, VariableType::Sint8) => out.sint8 = -64,
+        (0x9005, VariableType::Sint16) => out.sint16 = -30000,
+        (0x9006, VariableType::Sint32) => out.sint32 = -1000000000,
+        (0x9008, VariableType::Float32) => out.float32 = 1.45,
+        #[cfg(feature = "support_64bits")]
+        (0x9003, VariableType::Uint64) => out.uint64 = 0xFFFF111122223333,
+        #[cfg(feature = "support_64bits")]
+        (0x9007, VariableType::Sint64) => out.sint64 = -90000000000,
+        #[cfg(feature = "support_64bits")]
+        (0x9009, VariableType::Float64) => out.float64 = -5.123,
+        _ => return false,
+    }
+    true
+}
+
+static EACH_TYPE_READ_RPVS: &[RuntimePublishedValue] = &[
+    RuntimePublishedValue { id: 0x9000, var_type: VariableType::Uint8 },
+    RuntimePublishedValue { id: 0x9004, var_type: VariableType::Sint8 },
+    RuntimePublishedValue { id: 0x9001, var_type: VariableType::Uint16 },
+    RuntimePublishedValue { id: 0x9002, var_type: VariableType::Uint32 },
+    RuntimePublishedValue { id: 0x9005, var_type: VariableType::Sint16 },
+    RuntimePublishedValue { id: 0x9006, var_type: VariableType::Sint32 },
+    RuntimePublishedValue { id: 0x9008, var_type: VariableType::Float32 },
+    #[cfg(feature = "support_64bits")]
+    RuntimePublishedValue { id: 0x9003, var_type: VariableType::Uint64 },
+    #[cfg(feature = "support_64bits")]
+    RuntimePublishedValue { id: 0x9007, var_type: VariableType::Sint64 },
+    #[cfg(feature = "support_64bits")]
+    RuntimePublishedValue { id: 0x9009, var_type: VariableType::Float64 },
+];
+
+#[test]
+fn test_read_multiple_rpv_each_type() {
+    // Mirrors C++ TestReadMultipleRPVEachType: read one RPV of each type, check the encoding.
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(EACH_TYPE_READ_RPVS, Some(rpv_read_each_type_cb), None);
+    let mut h = MainHandler::new(cfg).unwrap();
+    connect(&mut h);
+
+    // Sorted by ID, like the C++ std::map.
+    let mut expected: Vec<(u16, Vec<u8>)> = Vec::new();
+    expected.push((0x9000, vec![0x99]));
+    expected.push((0x9001, vec![0xA5, 0xA5]));
+    expected.push((0x9002, vec![0x99, 0x88, 0x77, 0x66]));
+    #[cfg(feature = "support_64bits")]
+    expected.push((0x9003, vec![0xFF, 0xFF, 0x11, 0x11, 0x22, 0x22, 0x33, 0x33]));
+    expected.push((0x9004, vec![0xC0])); // -64
+    expected.push((0x9005, vec![0x8A, 0xD0])); // -30000
+    expected.push((0x9006, vec![0xC4, 0x65, 0x36, 0x00])); // -1 000 000 000
+    #[cfg(feature = "support_64bits")]
+    expected.push((0x9007, vec![0xFF, 0xFF, 0xFF, 0xEB, 0x0B, 0x94, 0xFC, 0x00])); // -90 000 000 000
+    expected.push((0x9008, vec![0x3F, 0xB9, 0x99, 0x9A])); // 1.45
+    #[cfg(feature = "support_64bits")]
+    expected.push((0x9009, vec![0xC0, 0x14, 0x7D, 0xF3, 0xB6, 0x45, 0xA1, 0xCB])); // -5.123
+
+    let mut payload = Vec::new();
+    for (id, _) in &expected {
+        payload.extend_from_slice(&id.to_be_bytes());
+    }
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+
+    let mut expected_payload = Vec::new();
+    for (id, value) in &expected {
+        expected_payload.extend_from_slice(&id.to_be_bytes());
+        expected_payload.extend_from_slice(value);
+    }
+    assert_eq!(resp_payload(&resp), expected_payload.as_slice());
+}
+
+#[test]
+fn test_read_rpv_response_overflow() {
+    // Mirrors C++ TestReadRPVResponseOverflow: the response does not fit the TX buffer.
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let tx_size = tx.len();
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(&TEST_RPVS, Some(rpv_read_cb), None);
+    let mut h = MainHandler::new(cfg).unwrap();
+    connect(&mut h);
+
+    // 0x1122 is Uint32: each entry takes id(2) + value(4) = 6 bytes in the response.
+    let nb_rpv = tx_size / 6 + 1;
+    let mut payload = Vec::new();
+    for _ in 0..nb_rpv {
+        payload.extend_from_slice(&[0x11, 0x22]);
+    }
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp[0], CommandId::MemoryControl as u8 | 0x80);
+    assert_eq!(resp[1], MemoryControlSubfn::ReadRpv as u8);
+    assert_eq!(resp_code(&resp), ResponseCode::Overflow as u8);
+    assert!(resp_payload(&resp).is_empty());
+}
+
 // ── MemoryControl/WriteRpv ───────────────────────────────────────────────────
 
 #[test]
@@ -1100,6 +1208,190 @@ fn test_write_rpv_empty_rpv_list() {
     let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8);
+}
+
+#[derive(Default)]
+struct AllTypeResult {
+    some_u8: u8,
+    some_s8: i8,
+    some_u16: u16,
+    some_s16: i16,
+    some_u32: u32,
+    some_s32: i32,
+    some_f32: f32,
+    #[cfg(feature = "support_64bits")]
+    some_u64: u64,
+    #[cfg(feature = "support_64bits")]
+    some_s64: i64,
+    #[cfg(feature = "support_64bits")]
+    some_f64: f64,
+}
+
+// Only test_write_rpv_all_types writes here; the Mutex keeps the access safe.
+static ALL_TYPE_WRITE_RESULT: std::sync::Mutex<Option<AllTypeResult>> = std::sync::Mutex::new(None);
+
+fn rpv_write_all_types_cb(rpv: RuntimePublishedValue, val: &AnyType) -> bool {
+    let mut guard = ALL_TYPE_WRITE_RESULT.lock().unwrap();
+    let dest = guard.get_or_insert_with(AllTypeResult::default);
+    unsafe {
+        match (rpv.id, rpv.var_type) {
+            (0x1000, VariableType::Uint8) => dest.some_u8 = val.uint8,
+            (0x1001, VariableType::Uint16) => dest.some_u16 = val.uint16,
+            (0x1002, VariableType::Uint32) => dest.some_u32 = val.uint32,
+            (0x1004, VariableType::Sint8) => dest.some_s8 = val.sint8,
+            (0x1005, VariableType::Sint16) => dest.some_s16 = val.sint16,
+            (0x1006, VariableType::Sint32) => dest.some_s32 = val.sint32,
+            (0x1008, VariableType::Float32) => dest.some_f32 = val.float32,
+            #[cfg(feature = "support_64bits")]
+            (0x1003, VariableType::Uint64) => dest.some_u64 = val.uint64,
+            #[cfg(feature = "support_64bits")]
+            (0x1007, VariableType::Sint64) => dest.some_s64 = val.sint64,
+            #[cfg(feature = "support_64bits")]
+            (0x1009, VariableType::Float64) => dest.some_f64 = val.float64,
+            _ => return false,
+        }
+    }
+    true
+}
+
+static ALL_TYPE_WRITE_RPVS: &[RuntimePublishedValue] = &[
+    RuntimePublishedValue { id: 0x1000, var_type: VariableType::Uint8 },
+    RuntimePublishedValue { id: 0x1004, var_type: VariableType::Sint8 },
+    RuntimePublishedValue { id: 0x1001, var_type: VariableType::Uint16 },
+    RuntimePublishedValue { id: 0x1002, var_type: VariableType::Uint32 },
+    RuntimePublishedValue { id: 0x1005, var_type: VariableType::Sint16 },
+    RuntimePublishedValue { id: 0x1006, var_type: VariableType::Sint32 },
+    RuntimePublishedValue { id: 0x1008, var_type: VariableType::Float32 },
+    #[cfg(feature = "support_64bits")]
+    RuntimePublishedValue { id: 0x1003, var_type: VariableType::Uint64 },
+    #[cfg(feature = "support_64bits")]
+    RuntimePublishedValue { id: 0x1007, var_type: VariableType::Sint64 },
+    #[cfg(feature = "support_64bits")]
+    RuntimePublishedValue { id: 0x1009, var_type: VariableType::Float64 },
+];
+
+static WRITE_U16_RPV: [RuntimePublishedValue; 1] = [RuntimePublishedValue { id: 0x1001, var_type: VariableType::Uint16 }];
+
+#[test]
+fn test_write_rpv_all_types() {
+    // Mirrors C++ TestWriteAllTypes: write one RPV of each type, check the decoded values.
+    *ALL_TYPE_WRITE_RESULT.lock().unwrap() = Some(AllTypeResult::default());
+
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(ALL_TYPE_WRITE_RPVS, None, Some(rpv_write_all_types_cb));
+    let mut h = MainHandler::new(cfg).unwrap();
+    connect(&mut h);
+
+    let mut entries: Vec<(u16, Vec<u8>)> = Vec::new();
+    entries.push((0x1000, vec![0x55]));
+    entries.push((0x1004, vec![0xC0]));
+    entries.push((0x1001, vec![0xAB, 0xCD]));
+    entries.push((0x1002, vec![0x12, 0x34, 0x56, 0x78]));
+    #[cfg(feature = "support_64bits")]
+    entries.push((0x1003, vec![0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10]));
+    entries.push((0x1005, vec![0x8A, 0xD0]));
+    entries.push((0x1006, vec![0xC4, 0x65, 0x36, 0x00]));
+    #[cfg(feature = "support_64bits")]
+    entries.push((0x1007, vec![0xFF, 0xFF, 0xFF, 0xEB, 0x0B, 0x94, 0xFC, 0x00]));
+    entries.push((0x1008, vec![0x3F, 0xB9, 0x99, 0x9A]));
+    #[cfg(feature = "support_64bits")]
+    entries.push((0x1009, vec![0xC0, 0x14, 0x7D, 0xF3, 0xB6, 0x45, 0xA1, 0xCB]));
+
+    let mut payload = Vec::new();
+    let mut expected_payload = Vec::new();
+    for (id, value) in &entries {
+        payload.extend_from_slice(&id.to_be_bytes());
+        payload.extend_from_slice(value);
+        expected_payload.extend_from_slice(&id.to_be_bytes());
+        expected_payload.push(value.len() as u8);
+    }
+
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    assert_eq!(resp_payload(&resp), expected_payload.as_slice());
+
+    let guard = ALL_TYPE_WRITE_RESULT.lock().unwrap();
+    let result = guard.as_ref().unwrap();
+    assert_eq!(result.some_u8, 0x55);
+    assert_eq!(result.some_s8, -64);
+    assert_eq!(result.some_u16, 0xABCD);
+    assert_eq!(result.some_u32, 0x12345678);
+    assert_eq!(result.some_s16, -30000);
+    assert_eq!(result.some_s32, -1000000000);
+    assert_eq!(result.some_f32, 1.45f32);
+    #[cfg(feature = "support_64bits")]
+    {
+        assert_eq!(result.some_u64, 0xFEDCBA9876543210);
+        assert_eq!(result.some_s64, -90000000000);
+        assert_eq!(result.some_f64, -5.123f64);
+    }
+}
+
+#[test]
+fn test_write_rpv_response_overflow() {
+    // Mirrors C++ TestWriteRPVResponseOverflow: the confirmation list does not fit the TX buffer.
+    const BUFFERSIZE_MIN_MOD3: usize = (MINIMUM_TX_BUFFER_SIZE as usize).div_ceil(3) * 3;
+    const NB_WRITE: usize = BUFFERSIZE_MIN_MOD3 / 3 + 1;
+    const RX_DATA_SIZE: usize = NB_WRITE * 4; // id(2) + uint16(2)
+    const TX_DATA_SIZE: usize = (NB_WRITE - 1) * 3; // id(2) + len(1), one entry short
+    const _: () = assert!(RX_DATA_SIZE >= MINIMUM_RX_BUFFER_SIZE as usize);
+    const _: () = assert!(TX_DATA_SIZE >= MINIMUM_TX_BUFFER_SIZE as usize);
+
+    let mut rx = [0u8; RX_DATA_SIZE];
+    let mut tx = [0u8; TX_DATA_SIZE];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(&WRITE_U16_RPV, None, Some(rpv_write_cb_ok));
+    let mut h = MainHandler::new(cfg).unwrap();
+    assert!(h.is_enabled());
+    connect(&mut h);
+
+    let mut payload = Vec::new();
+    for _ in 0..NB_WRITE {
+        payload.extend_from_slice(&[0x10, 0x01, 0xAA, 0xBB]);
+    }
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp.len(), 9);
+    assert_eq!(resp[0], CommandId::MemoryControl as u8 | 0x80);
+    assert_eq!(resp[1], MemoryControlSubfn::WriteRpv as u8);
+    assert_eq!(resp_code(&resp), ResponseCode::Overflow as u8);
+}
+
+#[test]
+fn test_write_rpv_response_full_no_overflow() {
+    // Mirrors C++ TestWriteRPVResponseFullNoOverflow: the confirmation list exactly fills the TX buffer.
+    const BUFFERSIZE_MIN_MOD3: usize = (MINIMUM_TX_BUFFER_SIZE as usize).div_ceil(3) * 3;
+    const NB_WRITE: usize = BUFFERSIZE_MIN_MOD3 / 3;
+    const RX_DATA_SIZE: usize = NB_WRITE * 4; // id(2) + uint16(2)
+    const TX_DATA_SIZE: usize = NB_WRITE * 3; // id(2) + len(1)
+    const _: () = assert!(RX_DATA_SIZE >= MINIMUM_RX_BUFFER_SIZE as usize);
+    const _: () = assert!(TX_DATA_SIZE >= MINIMUM_TX_BUFFER_SIZE as usize);
+
+    let mut rx = [0u8; RX_DATA_SIZE];
+    let mut tx = [0u8; TX_DATA_SIZE];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(&WRITE_U16_RPV, None, Some(rpv_write_cb_ok));
+    let mut h = MainHandler::new(cfg).unwrap();
+    assert!(h.is_enabled());
+    connect(&mut h);
+
+    let mut payload = Vec::new();
+    let mut expected_payload = Vec::new();
+    for _ in 0..NB_WRITE {
+        payload.extend_from_slice(&[0x10, 0x01, 0xAA, 0xBB]);
+        expected_payload.extend_from_slice(&[0x10, 0x01, 2]);
+    }
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp.len(), TX_DATA_SIZE + 9);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    assert_eq!(resp_payload(&resp), expected_payload.as_slice());
 }
 
 // ── Subfn routing ────────────────────────────────────────────────────────────

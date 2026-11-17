@@ -1,6 +1,6 @@
 use scrutiny_embedded_rust::build_config::{PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR};
 use scrutiny_embedded_rust::config::Config;
-use scrutiny_embedded_rust::loop_handler::{LoopHandler, LoopType};
+use scrutiny_embedded_rust::loop_handler::{FixedFreqLoopHandler, LoopHandler, LoopType, VariableFreqLoopHandler};
 use scrutiny_embedded_rust::main_handler::MainHandler;
 use scrutiny_embedded_rust::protocol::{
     CommandId, CommControlSubfn, GetInfoSubfn, ResponseCode, CONNECT_MAGIC,
@@ -428,11 +428,10 @@ fn test_rpv_definition_overflow() {
 
 // ── GetInfo/GetLoopCount ──────────────────────────────────────────────────────
 
-static TEST_LOOPS: [LoopHandler; 3] = [
-    LoopHandler::fixed_freq("Loop1", 0x12345678),
-    LoopHandler::variable_freq("Loop2"),
-    LoopHandler::fixed_freq("Loop3", 100),
-];
+static TEST_LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 0x12345678);
+static TEST_LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+static TEST_LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+static TEST_LOOPS: [&LoopHandler; 3] = [TEST_LOOP1.handler(), TEST_LOOP2.handler(), TEST_LOOP3.handler()];
 
 #[test]
 fn test_loop_count() {

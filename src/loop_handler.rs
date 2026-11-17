@@ -79,6 +79,8 @@ impl DataloggerHost for LoopHost {
     fn caller_name(&self) -> Option<&'static str> { Some(self.caller_name) }
 }
 
+/// Loop core shared by `FixedFreqLoopHandler` and `VariableFreqLoopHandler`.
+///
 /// Describes a time domain in which scrutiny-related probing can occur.
 /// Registered with `Config` so the server can discover loop properties via `GetInfo`.
 pub struct LoopHandler {
@@ -99,14 +101,14 @@ pub struct LoopHandler {
 }
 
 // SAFETY: `timebase` (and `dl_runtime` with datalogging) are `UnsafeCell` fields written
-// exclusively by the single loop task calling `process()`. The main handler only touches
+// exclusively by the single loop task calling `process_common()`. The main handler only touches
 // `main2loop` and `loop2main`, which are themselves `Sync` via their atomic-flag invariant.
 unsafe impl Sync for LoopHandler {}
 
 impl LoopHandler {
     /// Creates a fixed-frequency loop with the given name and timestep in 100 ns units.
     #[must_use]
-    pub const fn fixed_freq(name: &'static str, timestep_100ns: u32) -> Self {
+    pub(crate) const fn fixed_freq(name: &'static str, timestep_100ns: u32) -> Self {
         Self {
             name,
             loop_type: LoopType::FixedFreq,
@@ -125,7 +127,7 @@ impl LoopHandler {
 
     /// Creates a variable-frequency loop with the given name.
     #[must_use]
-    pub const fn variable_freq(name: &'static str) -> Self {
+    pub(crate) const fn variable_freq(name: &'static str) -> Self {
         Self {
             name,
             loop_type: LoopType::VariableFreq,
@@ -145,7 +147,7 @@ impl LoopHandler {
     /// Enables datalogging for this loop.
     #[cfg(feature = "datalogging")]
     #[must_use]
-    pub const fn with_datalogging(mut self) -> Self {
+    pub(crate) const fn with_datalogging(mut self) -> Self {
         self.datalogging_allowed = true;
         self
     }
@@ -175,6 +177,13 @@ impl LoopHandler {
         self.datalogging_allowed
     }
 
+    /// Returns the current timestamp of the loop timebase.
+    #[cfg(test)]
+    pub(crate) fn get_timestamp(&self) -> crate::types::Timestamp {
+        // SAFETY: only used by single-threaded tests, no concurrent `process_common()` call.
+        unsafe { (*self.timebase.get()).get_timestamp() }
+    }
+
     /// IPC channel from main handler to this loop.
     #[cfg(feature = "datalogging")]
     pub(crate) const fn main2loop(&self) -> &IpcMessage<Main2LoopMsg, StdAtomicFlag> {
@@ -187,9 +196,9 @@ impl LoopHandler {
         &self.loop2main
     }
 
-    /// Must be called on every loop tick. Advances the timebase, handles IPC messages,
+    /// Processing shared by both loop types: advances the timebase, handles IPC messages,
     /// and drives the datalogger state machine when datalogging is enabled.
-    pub fn process(&self, timestep: Timediff) {
+    pub(crate) fn process_common(&self, timestep: Timediff) {
         // SAFETY: only this loop task writes `timebase`.
         let timebase = unsafe { &mut *self.timebase.get() };
         timebase.step(timestep);
@@ -285,45 +294,110 @@ impl LoopHandler {
     }
 }
 
+/// Fixed-frequency loop: `process()` steps by the configured timestep.
+pub struct FixedFreqLoopHandler(LoopHandler);
+
+impl FixedFreqLoopHandler {
+    /// Creates a fixed-frequency loop with the given name and timestep in 100 ns units.
+    #[must_use]
+    pub const fn new(name: &'static str, timestep_100ns: u32) -> Self {
+        Self(LoopHandler::fixed_freq(name, timestep_100ns))
+    }
+
+    /// Enables datalogging for this loop.
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub const fn with_datalogging(self) -> Self {
+        Self(self.0.with_datalogging())
+    }
+
+    /// Returns the shared loop core, to register with `Config::set_loops`.
+    #[must_use]
+    pub const fn handler(&self) -> &LoopHandler {
+        &self.0
+    }
+
+    /// Must be called on every loop tick; steps the timebase by the configured timestep.
+    pub fn process(&self) {
+        self.0.process_common(self.0.get_timestep_100ns());
+    }
+
+    /// Same as `process()`, but steps the timebase by `timestep_100ns` instead of the configured timestep.
+    pub fn process_with_time(&self, timestep_100ns: Timediff) {
+        self.0.process_common(timestep_100ns);
+    }
+}
+
+/// Variable-frequency loop. There is no `process()`: the timestep must be given on every call.
+pub struct VariableFreqLoopHandler(LoopHandler);
+
+impl VariableFreqLoopHandler {
+    /// Creates a variable-frequency loop with the given name.
+    #[must_use]
+    pub const fn new(name: &'static str) -> Self {
+        Self(LoopHandler::variable_freq(name))
+    }
+
+    /// Enables datalogging for this loop.
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub const fn with_datalogging(self) -> Self {
+        Self(self.0.with_datalogging())
+    }
+
+    /// Returns the shared loop core, to register with `Config::set_loops`.
+    #[must_use]
+    pub const fn handler(&self) -> &LoopHandler {
+        &self.0
+    }
+
+    /// Must be called on every loop tick; steps the timebase by `timestep_100ns`.
+    pub fn process_with_time(&self, timestep_100ns: Timediff) {
+        self.0.process_common(timestep_100ns);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn loop_timestamp(loop_handler: &LoopHandler) -> crate::types::Timestamp {
-        // SAFETY: single-threaded test, no concurrent `process()` call.
-        unsafe { (*loop_handler.timebase.get()).get_timestamp() }
+    // process() steps by the configured timestep, process_with_time() by the given one.
+    #[test]
+    fn fixed_freq_process_steps_timebase() {
+        let fixed = FixedFreqLoopHandler::new("L", 100);
+        assert_eq!(fixed.handler().get_timestamp(), 0);
+        for _ in 0..3 {
+            fixed.process();
+        }
+        assert_eq!(fixed.handler().get_timestamp(), 300);
+        fixed.process_with_time(50);
+        assert_eq!(fixed.handler().get_timestamp(), 350);
     }
 
-    // process() steps the loop timebase, in every feature configuration.
+    // process_with_time() steps a variable-frequency loop by the given timestep.
     #[test]
-    fn process_steps_timebase() {
-        let fixed = LoopHandler::fixed_freq("L", 100);
-        let variable = LoopHandler::variable_freq("V");
-        assert_eq!(loop_timestamp(&fixed), 0);
-        assert_eq!(loop_timestamp(&variable), 0);
-
-        for _ in 0..5 {
-            fixed.process(100);
-        }
-        variable.process(10);
-        variable.process(25);
-
-        assert_eq!(loop_timestamp(&fixed), 500);
-        assert_eq!(loop_timestamp(&variable), 35);
+    fn variable_freq_process_with_time_steps_timebase() {
+        let variable = VariableFreqLoopHandler::new("V");
+        assert_eq!(variable.handler().get_timestamp(), 0);
+        variable.process_with_time(123);
+        assert_eq!(variable.handler().get_timestamp(), 123);
+        variable.process_with_time(10);
+        assert_eq!(variable.handler().get_timestamp(), 133);
     }
 
     // A loop handler is usable without the datalogging feature.
     #[cfg(not(feature = "datalogging"))]
     #[test]
     fn process_without_datalogging() {
-        static LOOPS: [LoopHandler; 1] = [LoopHandler::fixed_freq("L", 100)];
-        let loop_handler = &LOOPS[0];
+        static FAST: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100);
+        static LOOPS: [&LoopHandler; 1] = [FAST.handler()];
         for _ in 0..10 {
-            loop_handler.process(100);
+            FAST.process();
         }
+        let loop_handler = LOOPS[0];
         assert_eq!(loop_handler.get_name(), "L");
         assert_eq!(loop_handler.loop_type(), LoopType::FixedFreq);
         assert_eq!(loop_handler.get_timestep_100ns(), 100);
-        assert_eq!(loop_timestamp(loop_handler), 1000);
+        assert_eq!(loop_handler.get_timestamp(), 1000);
     }
 }

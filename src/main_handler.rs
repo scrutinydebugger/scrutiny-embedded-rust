@@ -140,7 +140,7 @@ pub struct MainHandler<'rxbuf, 'txbuf> {
     rpvs: Option<&'static [RuntimePublishedValue]>,
     rpv_read_callback: Option<RpvReadCallback>,
     rpv_write_callback: Option<RpvWriteCallback>,
-    loops: Option<&'static [LoopHandler]>,
+    loops: Option<&'static [&'static LoopHandler]>,
     #[cfg(feature = "protected_regions")]
     forbidden_ranges: Option<&'static [AddressRange]>,
     #[cfg(feature = "protected_regions")]
@@ -174,7 +174,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         let readonly_ranges = config.readonly_ranges();
         #[cfg(feature = "datalogging")]
         let datalogger_cell = {
-            let has_dl_loop = loops.is_some_and(|l| l.iter().any(LoopHandler::datalogging_allowed));
+            let has_dl_loop = loops.is_some_and(|l| l.iter().any(|loop_handler| loop_handler.datalogging_allowed()));
             if let Some((buf, len, cb)) = config.take_datalogger_buf() {
                 if has_dl_loop {
                     // Safety: caller guarantees buf is valid for len bytes and outlives this handler.
@@ -592,7 +592,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         memory_write_enable: bool,
         user_command_configured: bool,
         rpvs: Option<&'static [RuntimePublishedValue]>,
-        loops: Option<&'static [LoopHandler]>,
+        loops: Option<&'static [&'static LoopHandler]>,
         #[cfg(feature = "protected_regions")] forbidden_ranges: Option<&'static [AddressRange]>,
         #[cfg(feature = "protected_regions")] readonly_ranges: Option<&'static [AddressRange]>,
         datalogging_enabled: bool,
@@ -780,7 +780,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
 
                 match codec_v1_0::encode_response_get_info_loop_definition(
                     loop_id,
-                    &loop_slice[usize::from(loop_id)],
+                    loop_slice[usize::from(loop_id)],
                     tx_buf,
                 ) {
                     Ok(len) => {
@@ -1032,7 +1032,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
     fn process_datalog_control(
         comm: &mut CommHandler,
         tx_buf: &mut [u8],
-        loops: Option<&'static [LoopHandler]>,
+        loops: Option<&'static [&'static LoopHandler]>,
         rpvs: Option<&'static [RuntimePublishedValue]>,
         rpv_read_callback: Option<RpvReadCallback>,
         cell: &DataLoggerCell,

@@ -48,7 +48,7 @@ pub struct Config<'rxbuf, 'txbuf> {
     rpv_read_callback: Option<RpvReadCallback>,
     rpv_write_callback: Option<RpvWriteCallback>,
 
-    loops: Option<&'static [LoopHandler]>,
+    loops: Option<&'static [&'static LoopHandler]>,
 
     #[cfg(feature = "datalogging")]
     datalogger_buf: *mut u8,
@@ -224,13 +224,23 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
     }
 
     /// Registers the loop handlers that the server can query via `GetInfo/GetLoopDefinition`.
-    pub const fn set_loops(&mut self, loops: &'static [LoopHandler]) {
+    ///
+    /// ```
+    /// # use scrutiny_embedded_rust::loop_handler::{FixedFreqLoopHandler, LoopHandler, VariableFreqLoopHandler};
+    /// static FAST: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Fast", 1000);
+    /// static SLOW: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Slow");
+    /// static LOOPS: [&LoopHandler; 2] = [FAST.handler(), SLOW.handler()];
+    /// // config.set_loops(&LOOPS);
+    /// // In the fast task:  FAST.process();
+    /// // In the slow task:  SLOW.process_with_time(dt);
+    /// ```
+    pub const fn set_loops(&mut self, loops: &'static [&'static LoopHandler]) {
         self.loops = Some(loops);
     }
 
     /// Returns the loop handler slice, or `None` if unset.
     #[must_use]
-    pub const fn get_loops(&self) -> Option<&'static [LoopHandler]> {
+    pub const fn get_loops(&self) -> Option<&'static [&'static LoopHandler]> {
         self.loops
     }
 

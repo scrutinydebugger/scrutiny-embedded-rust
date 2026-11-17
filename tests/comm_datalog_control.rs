@@ -3,7 +3,7 @@
 use scrutiny_embedded_rust::build_config::DATALOGGING_MAX_SIGNAL;
 use scrutiny_embedded_rust::config::Config;
 use scrutiny_embedded_rust::datalogging::{State as DlState, MAX_OPERANDS};
-use scrutiny_embedded_rust::loop_handler::LoopHandler;
+use scrutiny_embedded_rust::loop_handler::{FixedFreqLoopHandler, LoopHandler, VariableFreqLoopHandler};
 use scrutiny_embedded_rust::main_handler::MainHandler;
 use scrutiny_embedded_rust::protocol::{CommandId, CommControlSubfn, DataLogControlSubfn, ResponseCode, CONNECT_MAGIC};
 use scrutiny_embedded_rust::tools::crc32;
@@ -211,30 +211,47 @@ fn get_status_state(h: &mut MainHandler<'_, '_>) -> u8 {
     resp_payload(&resp)[0]
 }
 
+// Lets the helpers drive either loop type with an explicit timestep.
+trait TestLoop {
+    fn process_with_time(&self, timestep_100ns: u32);
+}
+
+impl TestLoop for FixedFreqLoopHandler {
+    fn process_with_time(&self, timestep_100ns: u32) {
+        FixedFreqLoopHandler::process_with_time(self, timestep_100ns);
+    }
+}
+
+impl TestLoop for VariableFreqLoopHandler {
+    fn process_with_time(&self, timestep_100ns: u32) {
+        VariableFreqLoopHandler::process_with_time(self, timestep_100ns);
+    }
+}
+
 // Transfer ownership from main to loop and back (Configured state achieved).
 // Returns after main has received OwnershipTaken.
-fn do_ownership_transfer(h: &mut MainHandler<'_, '_>, loop_handler: &LoopHandler) {
+fn do_ownership_transfer(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop) {
     h.process(0); // sends TakeOwnership IPC
-    loop_handler.process(0); // receives TakeOwnership, sends OwnershipTaken
+    loop_handler.process_with_time(0); // receives TakeOwnership, sends OwnershipTaken
     h.process(0); // receives OwnershipTaken, sets dl.owner
 }
 
 // Arm trigger via protocol, then let loop process it.
-fn do_arm_trigger(h: &mut MainHandler<'_, '_>, loop_handler: &LoopHandler) {
+fn do_arm_trigger(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop) {
     let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ArmTrigger as u8, &[]);
     let resp = send_and_recv(h, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "ArmTrigger should succeed");
     h.process(0); // sends ArmTrigger IPC
-    loop_handler.process(0); // arms the trigger
-    loop_handler.process(0); // sends StatusUpdate
+    loop_handler.process_with_time(0); // arms the trigger
+    loop_handler.process_with_time(0); // sends StatusUpdate
     h.process(0); // receives StatusUpdate
 }
 
 // Run the loop until AcquisitionCompleted (uses AlwaysTrue trigger).
-fn run_until_acquisition(h: &mut MainHandler<'_, '_>, loop_handler: &LoopHandler) {
+fn run_until_acquisition(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop) {
     for _ in 0..500 {
-        loop_handler.process(1);
+        loop_handler.process_with_time(1);
         h.process(1);
         if get_status_state(h) == DlState::AcquisitionCompleted as u8 {
             return;
@@ -246,7 +263,7 @@ fn run_until_acquisition(h: &mut MainHandler<'_, '_>, loop_handler: &LoopHandler
 // Send a DataLogControl request that may trigger a release-for-read IPC roundtrip
 // (e.g. GetAcquisitionMetadata or ReadAcquisition while a loop still owns the datalogger).
 // Returns the response. Drives any ProcessAgain / release handshake transparently.
-fn send_and_recv_with_release(h: &mut MainHandler<'_, '_>, loop_handler: &LoopHandler, req: &[u8]) -> Vec<u8> {
+fn send_and_recv_with_release(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop, req: &[u8]) -> Vec<u8> {
     h.receive_data(req);
     // First tick: dispatch; on ProcessAgain, main-handler sets request_release=true and the
     // ReleaseOwnership IPC is sent at the end of this process() call.
@@ -255,7 +272,7 @@ fn send_and_recv_with_release(h: &mut MainHandler<'_, '_>, loop_handler: &LoopHa
         return pop_response(h);
     }
     // Loop acknowledges the release.
-    loop_handler.process(0);
+    loop_handler.process_with_time(0);
     // Next tick: main receives OwnershipReleased (owner=None, data preserved because
     // reset_on_release was false); the request is re-dispatched and the response is queued.
     h.process(0);
@@ -267,7 +284,7 @@ fn make_handler_with_loops<'rx, 'tx>(
     tx: &'tx mut [u8],
     dl_buf_ptr: *mut u8,
     dl_buf_len: usize,
-    loops: &'static [LoopHandler],
+    loops: &'static [&'static LoopHandler],
 ) -> MainHandler<'rx, 'tx> {
     let mut cfg = Config::new();
     cfg.set_buffers(rx, tx);
@@ -282,7 +299,8 @@ fn make_handler_with_loops<'rx, 'tx>(
 #[test]
 fn test_unsupported() {
     // Handler with no dl buffer — DataLogControl returns UnsupportedFeature for all subfns
-    static UNSUP_LOOPS: [LoopHandler; 1] = [LoopHandler::fixed_freq("L", 100).with_datalogging()];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100).with_datalogging();
+    static UNSUP_LOOPS: [&LoopHandler; 1] = [LOOP1.handler()];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
     let mut cfg = Config::new();
@@ -303,7 +321,8 @@ fn test_unsupported() {
 // Without a datalogging buffer, the state getter reports Idle and no error, like C++.
 #[test]
 fn test_getters_without_datalogging_buffer() {
-    static NO_BUF_LOOPS: [LoopHandler; 1] = [LoopHandler::fixed_freq("L", 100).with_datalogging()];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100).with_datalogging();
+    static NO_BUF_LOOPS: [&LoopHandler; 1] = [LOOP1.handler()];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
     let mut cfg = Config::new();
@@ -314,7 +333,7 @@ fn test_getters_without_datalogging_buffer() {
     assert_eq!(h.get_datalogger_state(), DlState::Idle);
     assert!(!h.datalogging_error());
     h.process(0);
-    NO_BUF_LOOPS[0].process(0);
+    LOOP1.process_with_time(0);
     h.process(0);
     assert_eq!(h.get_datalogger_state(), DlState::Idle);
     assert!(!h.datalogging_error());
@@ -322,7 +341,8 @@ fn test_getters_without_datalogging_buffer() {
 
 #[test]
 fn test_get_setup() {
-    static LOOPS_GET_SETUP: [LoopHandler; 1] = [LoopHandler::fixed_freq("L", 100).with_datalogging()];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100).with_datalogging();
+    static LOOPS_GET_SETUP: [&LoopHandler; 1] = [LOOP1.handler()];
     static mut DL_BUF_GET_SETUP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 256];
@@ -344,11 +364,10 @@ fn test_get_setup() {
 
 #[test]
 fn test_configure_valid() {
-    static LOOPS_CONFIGURE_VALID: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_CONFIGURE_VALID: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_CONFIGURE_VALID: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -363,11 +382,10 @@ fn test_configure_valid() {
 
 #[test]
 fn test_configure_bad_loop_id() {
-    static LOOPS_BAD_LOOP: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_BAD_LOOP: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_BAD_LOOP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -383,11 +401,10 @@ fn test_configure_bad_loop_id() {
 
 #[test]
 fn test_configure_no_datalogging_support() {
-    static LOOPS_NO_DL: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100), // no datalogging
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100); // no datalogging
+    static LOOPS_NO_DL: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_NO_DL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -403,11 +420,10 @@ fn test_configure_no_datalogging_support() {
 
 #[test]
 fn test_configure_item_count_overflow() {
-    static LOOPS_OVERFLOW: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_OVERFLOW: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OVERFLOW: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     let mut tx = [0u8; 128];
@@ -426,11 +442,10 @@ fn test_configure_item_count_overflow() {
 
 #[test]
 fn test_configure_operand_count_overflow() {
-    static LOOPS_OP_OVERFLOW: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_OP_OVERFLOW: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OP_OVERFLOW: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     let mut tx = [0u8; 128];
@@ -449,11 +464,10 @@ fn test_configure_operand_count_overflow() {
 
 #[test]
 fn test_configure_operand_count_mismatch() {
-    static LOOPS_OP_MISMATCH: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_OP_MISMATCH: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OP_MISMATCH: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -470,11 +484,10 @@ fn test_configure_operand_count_mismatch() {
 
 #[test]
 fn test_bad_decimation() {
-    static LOOPS_BAD_DEC: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_BAD_DEC: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_BAD_DEC: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -490,11 +503,10 @@ fn test_bad_decimation() {
 
 #[test]
 fn test_configure_bad_operands() {
-    static LOOPS_BAD_OP: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_BAD_OP: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_BAD_OP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -519,11 +531,10 @@ fn test_configure_bad_operands() {
 
 #[test]
 fn test_configure_operand_bad_rpv() {
-    static LOOPS_BAD_RPV: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_BAD_RPV: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_BAD_RPV: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -540,11 +551,10 @@ fn test_configure_operand_bad_rpv() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_configure_signal_in_forbidden_region() {
-    static LOOPS_FORBIDDEN_SIG: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_FORBIDDEN_SIG: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_FORBIDDEN_SIG: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     static mut FORBIDDEN_VAR_SIG: u32 = 0;
     static FORBIDDEN_RANGES_SIG: [AddressRange; 1] = [AddressRange {
@@ -576,11 +586,10 @@ fn test_configure_signal_in_forbidden_region() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_configure_operand_var_in_forbidden_region() {
-    static LOOPS_FORBIDDEN_VAR: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_FORBIDDEN_VAR: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_FORBIDDEN_VAR: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     static mut FORBIDDEN_VAR_OP: u32 = 0;
     static FORBIDDEN_RANGES_VAR: [AddressRange; 1] = [AddressRange {
@@ -612,11 +621,10 @@ fn test_configure_operand_var_in_forbidden_region() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_configure_operand_varbit_in_forbidden_region() {
-    static LOOPS_FORBIDDEN_VARBIT: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_FORBIDDEN_VARBIT: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_FORBIDDEN_VARBIT: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     static mut FORBIDDEN_VAR_VB: u32 = 0;
     static FORBIDDEN_RANGES_VARBIT: [AddressRange; 1] = [AddressRange {
@@ -650,11 +658,10 @@ fn test_configure_operand_varbit_in_forbidden_region() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_configure_operand_varbit_almost_in_forbidden_region() {
-    static LOOPS_ALMOST_FORBIDDEN: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_ALMOST_FORBIDDEN: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_ALMOST_FORBIDDEN: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     static ALMOST_FORBIDDEN_BUFFER: [u8; 8] = [0; 8];
     // Forbid indices 4..6
@@ -689,11 +696,10 @@ fn test_configure_operand_varbit_almost_in_forbidden_region() {
 
 #[test]
 fn test_configure_unknown_condition() {
-    static LOOPS_UNK_COND: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_UNK_COND: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_UNK_COND: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -710,11 +716,10 @@ fn test_configure_unknown_condition() {
 // boolean16/32/64 (0x31-0x33) are not supported. A Var operand using them must be rejected.
 #[test]
 fn test_configure_operand_var_sized_boolean_rejected() {
-    static LOOPS_VAR_SIZED_BOOL: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_VAR_SIZED_BOOL: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_VAR_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -737,11 +742,10 @@ fn test_configure_operand_var_sized_boolean_rejected() {
 // boolean16/32/64 (0x31-0x33) are not supported. A VarBit operand using them must be rejected.
 #[test]
 fn test_configure_operand_varbit_sized_boolean_rejected() {
-    static LOOPS_VARBIT_SIZED_BOOL: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_VARBIT_SIZED_BOOL: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_VARBIT_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -765,11 +769,10 @@ fn test_configure_operand_varbit_sized_boolean_rejected() {
 
 #[test]
 fn test_configure_loggable_bad_rpv() {
-    static LOOPS_LOGGABLE_BAD_RPV: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_LOGGABLE_BAD_RPV: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_LOGGABLE_BAD_RPV: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
@@ -785,11 +788,10 @@ fn test_configure_loggable_bad_rpv() {
 
 #[test]
 fn test_owner_mechanism() {
-    static LOOPS_OWNER: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_OWNER: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OWNER: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
@@ -797,8 +799,8 @@ fn test_owner_mechanism() {
     let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_OWNER).cast(), DATALOG_BUFFER_SIZE, &LOOPS_OWNER);
     connect(&mut h);
 
-    let loop0 = &LOOPS_OWNER[0];
-    let loop1 = &LOOPS_OWNER[1];
+    let loop0 = &LOOP1;
+    let loop1 = &LOOP2;
 
     // Configure loop 0 with AlwaysTrue
     let cfg0 = get_simple_trigger_config(0);
@@ -829,7 +831,7 @@ fn test_owner_mechanism() {
 
     // Loop0 must release first
     h.process(0); // sends ReleaseOwnership IPC
-    loop0.process(0); // receives ReleaseOwnership, sends OwnershipReleased
+    loop0.process_with_time(0); // receives ReleaseOwnership, sends OwnershipReleased
     h.process(0); // receives OwnershipReleased (dl.owner = None), retries configure → Ok
 
     let resp = pop_response(&mut h);
@@ -838,7 +840,7 @@ fn test_owner_mechanism() {
 
     // Now loop1 gets TakeOwnership
     h.process(0); // sends TakeOwnership IPC to loop1
-    loop1.process(0); // receives TakeOwnership, sends OwnershipTaken
+    loop1.process_with_time(0); // receives TakeOwnership, sends OwnershipTaken
     h.process(0); // receives OwnershipTaken
 
     // Arm loop1
@@ -851,7 +853,8 @@ fn test_owner_mechanism() {
 
 #[test]
 fn test_arm_trigger_not_configured() {
-    static LOOPS_ARM_NOT_CFG: [LoopHandler; 1] = [LoopHandler::fixed_freq("Loop1", 100).with_datalogging()];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOPS_ARM_NOT_CFG: [&LoopHandler; 1] = [LOOP1.handler()];
     static mut DL_BUF_ARM_NOT_CFG: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
@@ -866,18 +869,17 @@ fn test_arm_trigger_not_configured() {
 
 #[test]
 fn test_arm_disarm_trigger_ok() {
-    static LOOPS_ARM_DISARM: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_ARM_DISARM: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_ARM_DISARM: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
     let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_ARM_DISARM).cast(), DATALOG_BUFFER_SIZE, &LOOPS_ARM_DISARM);
     connect(&mut h);
 
-    let loop0 = &LOOPS_ARM_DISARM[0];
+    let loop0 = &LOOP1;
 
     // Configure with the reference config (Equal condition, won't auto-trigger)
     let cfg = get_valid_reference_config();
@@ -895,8 +897,8 @@ fn test_arm_disarm_trigger_ok() {
     h.process(0);
     assert_eq!(resp_code(&arm_resp), ResponseCode::Ok as u8);
     h.process(0); // sends ArmTrigger IPC
-    loop0.process(0); // arms the trigger
-    loop0.process(0); // sends StatusUpdate
+    loop0.process_with_time(0); // arms the trigger
+    loop0.process_with_time(0); // sends StatusUpdate
     h.process(0); // receives StatusUpdate
     assert_eq!(get_status_state(&mut h), DlState::Armed as u8);
 
@@ -906,19 +908,18 @@ fn test_arm_disarm_trigger_ok() {
     h.process(0);
     assert_eq!(resp_code(&disarm_resp), ResponseCode::Ok as u8);
     h.process(0); // sends DisarmTrigger IPC
-    loop0.process(0); // disarms the trigger
-    loop0.process(0); // sends StatusUpdate
+    loop0.process_with_time(0); // disarms the trigger
+    loop0.process_with_time(0); // sends StatusUpdate
     h.process(0); // receives StatusUpdate
     assert_eq!(get_status_state(&mut h), DlState::Configured as u8);
 }
 
 #[test]
 fn test_get_status() {
-    static LOOPS_GET_STATUS: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_GET_STATUS: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_GET_STATUS: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
@@ -926,7 +927,7 @@ fn test_get_status() {
     let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_GET_STATUS).cast(), DATALOG_BUFFER_SIZE, &LOOPS_GET_STATUS);
     connect(&mut h);
 
-    let loop0 = &LOOPS_GET_STATUS[0];
+    let loop0 = &LOOP1;
 
     // Initial state: Idle
     assert_eq!(get_status_state(&mut h), DlState::Idle as u8, "initial state should be Idle");
@@ -940,7 +941,7 @@ fn test_get_status() {
     do_ownership_transfer(&mut h, loop0);
 
     // After ownership transfer: loop sends StatusUpdate when it processes
-    loop0.process(0); // send status
+    loop0.process_with_time(0); // send status
     h.process(0); // receive status
     assert_eq!(get_status_state(&mut h), DlState::Configured as u8, "should be Configured");
 
@@ -955,11 +956,10 @@ fn test_get_status() {
 
 #[test]
 fn test_get_acquisition_metadata() {
-    static LOOPS_META: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_META: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_META: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
@@ -967,7 +967,7 @@ fn test_get_acquisition_metadata() {
     let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_META).cast(), DATALOG_BUFFER_SIZE, &LOOPS_META);
     connect(&mut h);
 
-    let loop0 = &LOOPS_META[0];
+    let loop0 = &LOOP1;
 
     // Configure
     let cfg = get_simple_trigger_config(0);
@@ -1001,7 +1001,8 @@ fn test_get_acquisition_metadata() {
 
 #[test]
 fn test_read_acquisition_no_data_available() {
-    static LOOPS_READ_NO_DATA: [LoopHandler; 1] = [LoopHandler::fixed_freq("Loop1", 100).with_datalogging()];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOPS_READ_NO_DATA: [&LoopHandler; 1] = [LOOP1.handler()];
     static mut DL_BUF_READ_NO_DATA: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
@@ -1016,11 +1017,10 @@ fn test_read_acquisition_no_data_available() {
 
 #[test]
 fn test_read_acquisition_one_transfer() {
-    static LOOPS_READ_ONE: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_READ_ONE: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_READ_ONE: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     // TX must be large enough to hold the entire buffer in one frame
@@ -1029,7 +1029,7 @@ fn test_read_acquisition_one_transfer() {
     let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_READ_ONE).cast(), DATALOG_BUFFER_SIZE, &LOOPS_READ_ONE);
     connect(&mut h);
 
-    let loop0 = &LOOPS_READ_ONE[0];
+    let loop0 = &LOOP1;
 
     let cfg = get_simple_trigger_config(0);
     let resp = send_configure(&mut h, &cfg);
@@ -1070,11 +1070,10 @@ fn test_read_acquisition_one_transfer() {
 
 #[test]
 fn test_read_acquisition_multiple_transfers() {
-    static LOOPS_READ_MULTI: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_READ_MULTI: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_READ_MULTI: [u8; 1000] = [0; 1000];
     const DL_BUF_LEN: usize = 1000;
     const TX_LEN: usize = 64;
@@ -1084,7 +1083,7 @@ fn test_read_acquisition_multiple_transfers() {
     let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_READ_MULTI).cast(), 1000, &LOOPS_READ_MULTI);
     connect(&mut h);
 
-    let loop0 = &LOOPS_READ_MULTI[0];
+    let loop0 = &LOOP1;
 
     let cfg = get_simple_trigger_config(0);
     let resp = send_configure(&mut h, &cfg);
@@ -1096,7 +1095,7 @@ fn test_read_acquisition_multiple_transfers() {
 
     // Run until acquisition complete (need more iterations for bigger buffer)
     for _ in 0..5000 {
-        loop0.process(1);
+        loop0.process_with_time(1);
         h.process(1);
         if get_status_state(&mut h) == DlState::AcquisitionCompleted as u8 {
             break;
@@ -1154,18 +1153,17 @@ fn test_read_acquisition_multiple_transfers() {
 
 #[test]
 fn test_reset_datalogger() {
-    static LOOPS_RESET: [LoopHandler; 3] = [
-        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
-        LoopHandler::variable_freq("Loop2").with_datalogging(),
-        LoopHandler::fixed_freq("Loop3", 100),
-    ];
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOPS_RESET: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_RESET: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
     let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_RESET).cast(), DATALOG_BUFFER_SIZE, &LOOPS_RESET);
     connect(&mut h);
 
-    let loop0 = &LOOPS_RESET[0];
+    let loop0 = &LOOP1;
 
     // Initial state: Idle
     assert_eq!(get_status_state(&mut h), DlState::Idle as u8);
@@ -1181,7 +1179,7 @@ fn test_reset_datalogger() {
     do_ownership_transfer(&mut h, loop0);
 
     // Send StatusUpdate to get Configured state visible
-    loop0.process(0); // send status
+    loop0.process_with_time(0); // send status
     h.process(0); // receive status
     assert_eq!(get_status_state(&mut h), DlState::Configured as u8);
 
@@ -1192,7 +1190,7 @@ fn test_reset_datalogger() {
 
     // Loop must release before reset proceeds
     h.process(0); // sends ReleaseOwnership IPC
-    loop0.process(0); // receives ReleaseOwnership, sends OwnershipReleased
+    loop0.process_with_time(0); // receives ReleaseOwnership, sends OwnershipReleased
     h.process(1); // receives OwnershipReleased, retries Reset → Ok
     h.process(0); // allow sending
 

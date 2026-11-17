@@ -7,7 +7,7 @@ use crate::config::RpvReadCallback;
 #[cfg(feature = "datalogging")]
 use crate::datalogging::{DataLoggerCell, DataloggerHost, State};
 #[cfg(feature = "datalogging")]
-use crate::ipc::{IpcMessage, Loop2MainMsg, Loop2MainMsgKind, Main2LoopMsg, StdAtomicFlag};
+use crate::ipc::{IpcMessage, Loop2MainMsg, Loop2MainMsgKind, Main2LoopMsg, LoopIpcFlag};
 #[cfg(feature = "datalogging")]
 use crate::types::{AnyType, RuntimePublishedValue};
 #[cfg(feature = "datalogging")]
@@ -95,9 +95,9 @@ pub struct LoopHandler {
     #[cfg(feature = "datalogging")]
     dl_runtime: UnsafeCell<LoopDlRuntime>,
     #[cfg(feature = "datalogging")]
-    main2loop: IpcMessage<Main2LoopMsg, StdAtomicFlag>,
+    main2loop: IpcMessage<Main2LoopMsg, LoopIpcFlag>,
     #[cfg(feature = "datalogging")]
-    loop2main: IpcMessage<Loop2MainMsg, StdAtomicFlag>,
+    loop2main: IpcMessage<Loop2MainMsg, LoopIpcFlag>,
 }
 
 // SAFETY: `timebase` (and `dl_runtime` with datalogging) are `UnsafeCell` fields written
@@ -119,9 +119,9 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None }),
+            main2loop: IpcMessage::new_loop(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None }),
             #[cfg(feature = "datalogging")]
-            loop2main: IpcMessage::new_std(Loop2MainMsg::DEFAULT),
+            loop2main: IpcMessage::new_loop(Loop2MainMsg::DEFAULT),
         }
     }
 
@@ -138,9 +138,9 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None }),
+            main2loop: IpcMessage::new_loop(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None }),
             #[cfg(feature = "datalogging")]
-            loop2main: IpcMessage::new_std(Loop2MainMsg::DEFAULT),
+            loop2main: IpcMessage::new_loop(Loop2MainMsg::DEFAULT),
         }
     }
 
@@ -186,13 +186,13 @@ impl LoopHandler {
 
     /// IPC channel from main handler to this loop.
     #[cfg(feature = "datalogging")]
-    pub(crate) const fn main2loop(&self) -> &IpcMessage<Main2LoopMsg, StdAtomicFlag> {
+    pub(crate) const fn main2loop(&self) -> &IpcMessage<Main2LoopMsg, LoopIpcFlag> {
         &self.main2loop
     }
 
     /// IPC channel from this loop to the main handler.
     #[cfg(feature = "datalogging")]
-    pub(crate) const fn loop2main(&self) -> &IpcMessage<Loop2MainMsg, StdAtomicFlag> {
+    pub(crate) const fn loop2main(&self) -> &IpcMessage<Loop2MainMsg, LoopIpcFlag> {
         &self.loop2main
     }
 

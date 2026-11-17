@@ -9,6 +9,10 @@ use core::sync::atomic::{AtomicBool, Ordering};
 /// # Safety
 /// Implementors must guarantee that `load` and `store` are individually safe to call from
 /// concurrent contexts (ISR + main loop). `Sync` is a supertrait to enforce this at the type level.
+///
+/// # Platform flags
+/// To use another flag for the loop IPC channels: implement this trait, provide a
+/// `const fn new(val: bool) -> Self` on the type, then point [`LoopIpcFlag`] to it.
 pub trait AtomicFlag: Sync {
     /// Reads the flag with Acquire ordering.
     fn load(&self) -> bool;
@@ -39,6 +43,10 @@ impl AtomicFlag for StdAtomicFlag {
         self.0.store(val, Ordering::Release);
     }
 }
+
+/// Flag type used by the loop IPC channels.
+// Single place to change (or later make cfg-selectable) to use another platform flag.
+pub type LoopIpcFlag = StdAtomicFlag;
 
 // ===== IpcMessage =====
 
@@ -101,6 +109,16 @@ impl<T: Copy> IpcMessage<T, StdAtomicFlag> {
     #[must_use]
     pub const fn new_std(init: T) -> Self {
         Self { data: UnsafeCell::new(init), flag: StdAtomicFlag::new(false) }
+    }
+}
+
+// Loop IPC channels only exist with datalogging.
+#[cfg(feature = "datalogging")]
+impl<T: Copy> IpcMessage<T, LoopIpcFlag> {
+    /// Creates a new `IpcMessage` backed by `LoopIpcFlag`, for the loop IPC channels.
+    #[must_use]
+    pub(crate) const fn new_loop(init: T) -> Self {
+        Self { data: UnsafeCell::new(init), flag: LoopIpcFlag::new(false) }
     }
 }
 

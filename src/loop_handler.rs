@@ -1,16 +1,13 @@
-#[cfg(feature = "datalogging")]
+use crate::timebase::Timebase;
 use crate::types::Timediff;
-
-#[cfg(feature = "datalogging")]
 use core::cell::UnsafeCell;
+
 #[cfg(feature = "datalogging")]
 use crate::config::RpvReadCallback;
 #[cfg(feature = "datalogging")]
 use crate::datalogging::{DataLoggerCell, DataloggerHost, State};
 #[cfg(feature = "datalogging")]
 use crate::ipc::{IpcMessage, Loop2MainMsg, Loop2MainMsgKind, Main2LoopMsg, StdAtomicFlag};
-#[cfg(feature = "datalogging")]
-use crate::timebase::Timebase;
 #[cfg(feature = "datalogging")]
 use crate::types::{AnyType, RuntimePublishedValue};
 #[cfg(feature = "datalogging")]
@@ -92,7 +89,6 @@ pub struct LoopHandler {
     datalogging_allowed: bool,
     // Loop-private mutable state: only the loop task writes these;
     // the main handler only reads IpcMessage fields (already Sync).
-    #[cfg(feature = "datalogging")]
     timebase: UnsafeCell<Timebase>,
     #[cfg(feature = "datalogging")]
     dl_runtime: UnsafeCell<LoopDlRuntime>,
@@ -102,10 +98,9 @@ pub struct LoopHandler {
     loop2main: IpcMessage<Loop2MainMsg, StdAtomicFlag>,
 }
 
-// SAFETY: `timebase` and `dl_runtime` are `UnsafeCell` fields written exclusively by
-// the single loop task calling `process()`. The main handler only touches `main2loop`
-// and `loop2main`, which are themselves `Sync` via their atomic-flag invariant.
-#[cfg(feature = "datalogging")]
+// SAFETY: `timebase` (and `dl_runtime` with datalogging) are `UnsafeCell` fields written
+// exclusively by the single loop task calling `process()`. The main handler only touches
+// `main2loop` and `loop2main`, which are themselves `Sync` via their atomic-flag invariant.
 unsafe impl Sync for LoopHandler {}
 
 impl LoopHandler {
@@ -118,7 +113,6 @@ impl LoopHandler {
             timestep_100ns,
             #[cfg(feature = "datalogging")]
             datalogging_allowed: false,
-            #[cfg(feature = "datalogging")]
             timebase: UnsafeCell::new(Timebase::new()),
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
@@ -138,7 +132,6 @@ impl LoopHandler {
             timestep_100ns: 0,
             #[cfg(feature = "datalogging")]
             datalogging_allowed: false,
-            #[cfg(feature = "datalogging")]
             timebase: UnsafeCell::new(Timebase::new()),
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
@@ -195,15 +188,22 @@ impl LoopHandler {
     }
 
     /// Must be called on every loop tick. Advances the timebase, handles IPC messages,
-    /// and drives the datalogger state machine.
-    #[cfg(feature = "datalogging")]
+    /// and drives the datalogger state machine when datalogging is enabled.
     pub fn process(&self, timestep: Timediff) {
-        // SAFETY: only this loop task writes `timebase` and `dl_runtime`.
+        // SAFETY: only this loop task writes `timebase`.
         let timebase = unsafe { &mut *self.timebase.get() };
         timebase.step(timestep);
 
+        #[cfg(feature = "datalogging")]
+        self.process_datalogging(timebase);
+    }
+
+    /// Handles datalogging IPC messages and drives the owned datalogger.
+    #[cfg(feature = "datalogging")]
+    fn process_datalogging(&self, timebase: &Timebase) {
         if !self.datalogging_allowed { return; }
 
+        // SAFETY: only this loop task writes `dl_runtime`.
         let runtime = unsafe { &mut *self.dl_runtime.get() };
 
         // Handle inbound IPC message if the outbound slot is free.
@@ -282,5 +282,48 @@ impl LoopHandler {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn loop_timestamp(loop_handler: &LoopHandler) -> crate::types::Timestamp {
+        // SAFETY: single-threaded test, no concurrent `process()` call.
+        unsafe { (*loop_handler.timebase.get()).get_timestamp() }
+    }
+
+    // process() steps the loop timebase, in every feature configuration.
+    #[test]
+    fn process_steps_timebase() {
+        let fixed = LoopHandler::fixed_freq("L", 100);
+        let variable = LoopHandler::variable_freq("V");
+        assert_eq!(loop_timestamp(&fixed), 0);
+        assert_eq!(loop_timestamp(&variable), 0);
+
+        for _ in 0..5 {
+            fixed.process(100);
+        }
+        variable.process(10);
+        variable.process(25);
+
+        assert_eq!(loop_timestamp(&fixed), 500);
+        assert_eq!(loop_timestamp(&variable), 35);
+    }
+
+    // A loop handler is usable without the datalogging feature.
+    #[cfg(not(feature = "datalogging"))]
+    #[test]
+    fn process_without_datalogging() {
+        static LOOPS: [LoopHandler; 1] = [LoopHandler::fixed_freq("L", 100)];
+        let loop_handler = &LOOPS[0];
+        for _ in 0..10 {
+            loop_handler.process(100);
+        }
+        assert_eq!(loop_handler.get_name(), "L");
+        assert_eq!(loop_handler.loop_type(), LoopType::FixedFreq);
+        assert_eq!(loop_handler.get_timestep_100ns(), 100);
+        assert_eq!(loop_timestamp(loop_handler), 1000);
     }
 }

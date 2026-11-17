@@ -1,6 +1,5 @@
 use crate::build_config;
 use crate::config::{Config, RpvReadCallback, RpvWriteCallback, UserCommandCallback};
-#[cfg(feature = "datalogging")]
 use crate::loop_handler::LoopHandler;
 use crate::protocol::codec_v1_0;
 use crate::protocol::definitions::{
@@ -256,6 +255,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         self.timebase.step(timestep_100ns);
         self.comm.process(&self.timebase);
 
+        #[cfg(feature = "datalogging")]
         self.process_loops();
         #[cfg(feature = "datalogging")]
         self.process_datalogging_logic();
@@ -311,6 +311,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
         }
 
+        #[cfg(feature = "datalogging")]
         self.process_loops();
         #[cfg(feature = "datalogging")]
         self.process_datalogging_logic();
@@ -403,15 +404,14 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
 
     // ── Loop / datalogging IPC pumps ──────────────────────────────────────────
 
+    // Loop IPC only carries datalogging messages, so there is nothing to pump without the feature.
+    #[cfg(feature = "datalogging")]
     fn process_loops(&mut self) {
         let Some(loops) = self.loops else { return };
         for (i, loop_handler) in loops.iter().enumerate() {
-            #[cfg(feature = "datalogging")]
             if let Some(msg) = loop_handler.loop2main().pop() {
                 self.handle_loop2main_msg(u8::try_from(i).unwrap_or(u8::MAX), msg);
             }
-            #[cfg(not(feature = "datalogging"))]
-            let _ = loop_handler;
         }
     }
 
@@ -624,14 +624,9 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 #[cfg(not(feature = "support_64bits"))]
                 let support_64bits = false;
 
-                #[cfg(feature = "datalogging")]
-                let dl = datalogging_enabled;
-                #[cfg(not(feature = "datalogging"))]
-                let dl = false;
-
                 match codec_v1_0::encode_response_get_info_supported_features(
                     memory_write_enable,
-                    dl,
+                    datalogging_enabled,
                     user_command_configured,
                     support_64bits,
                     tx_buf,

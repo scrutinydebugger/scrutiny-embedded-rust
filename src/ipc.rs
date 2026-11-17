@@ -105,10 +105,9 @@ impl<T: Copy> IpcMessage<T, StdAtomicFlag> {
 pub enum Main2LoopMsg {
     /// `cell_addr` is the `*const DataLoggerCell` cast to `usize` to stay `Send`.
     TakeOwnership {
-        cell_addr:      usize,
-        rpvs:           Option<&'static [crate::types::RuntimePublishedValue]>,
-        rpv_read_cb:    Option<crate::config::RpvReadCallback>,
-        read_memory_cb: Option<crate::config::ReadMemoryCallback>,
+        cell_addr:   usize,
+        rpvs:        Option<&'static [crate::types::RuntimePublishedValue]>,
+        rpv_read_cb: Option<crate::config::RpvReadCallback>,
     },
     ReleaseOwnership,
     ArmTrigger,

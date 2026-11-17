@@ -22,10 +22,6 @@ pub type DataloggingTriggerCallback = fn();
 /// Datalogger buffer descriptor returned by `Config::take_datalogger_buf`.
 pub(crate) type DataloggerBufDesc = (*mut u8, usize, Option<DataloggingTriggerCallback>);
 
-#[cfg(feature = "datalogging")]
-/// Callback for reading arbitrary memory during datalogging acquisition.
-/// If not registered, `ptr::copy_nonoverlapping` is used.
-pub type ReadMemoryCallback = unsafe fn(*mut u8, *const u8, usize) -> bool;
 
 /// Runtime configuration handed to `MainHandler` at startup.
 ///
@@ -52,8 +48,6 @@ pub struct Config<'rxbuf, 'txbuf> {
     datalogger_buf_len: usize,
     #[cfg(feature = "datalogging")]
     datalogger_trigger_cb: Option<fn()>,
-    #[cfg(feature = "datalogging")]
-    read_memory_callback: Option<ReadMemoryCallback>,
 
     user_command_callback: Option<UserCommandCallback>,
 
@@ -88,8 +82,6 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
             datalogger_buf_len: 0,
             #[cfg(feature = "datalogging")]
             datalogger_trigger_cb: None,
-            #[cfg(feature = "datalogging")]
-            read_memory_callback: None,
             user_command_callback: None,
             max_bitrate: 0,
             session_counter_seed: 0,
@@ -116,7 +108,6 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
             self.datalogger_buf = core::ptr::null_mut();
             self.datalogger_buf_len = 0;
             self.datalogger_trigger_cb = None;
-            self.read_memory_callback = None;
         }
         self.user_command_callback = None;
         self.max_bitrate = 0;
@@ -272,19 +263,6 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
         self.datalogger_buf_len = 0;
         self.datalogger_trigger_cb = None;
         Some((buf, len, cb))
-    }
-
-    /// Registers a custom memory-read function used during datalogging acquisition.
-    /// Falls back to `ptr::copy_nonoverlapping` when unset.
-    #[cfg(feature = "datalogging")]
-    pub fn set_read_memory_callback(&mut self, cb: ReadMemoryCallback) {
-        self.read_memory_callback = Some(cb);
-    }
-
-    /// Returns the custom memory-read callback, or `None` if unset.
-    #[cfg(feature = "datalogging")]
-    pub(crate) fn get_read_memory_callback(&self) -> Option<ReadMemoryCallback> {
-        self.read_memory_callback
     }
 
     /// Returns the RPV read callback, or `None` if unset.

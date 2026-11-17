@@ -3,7 +3,7 @@ use crate::types::Timediff;
 #[cfg(feature = "datalogging")]
 use core::cell::UnsafeCell;
 #[cfg(feature = "datalogging")]
-use crate::config::{ReadMemoryCallback, RpvReadCallback};
+use crate::config::RpvReadCallback;
 #[cfg(feature = "datalogging")]
 use crate::datalogging::{DataLoggerCell, DataloggerHost, State};
 #[cfg(feature = "datalogging")]
@@ -32,38 +32,33 @@ struct LoopDlRuntime {
     data_notified:  bool,
     /// Address of the `DataLoggerCell` received via `TakeOwnership` IPC; null when not owned.
     cell:           *const DataLoggerCell,
-    rpvs:           Option<&'static [RuntimePublishedValue]>,
-    rpv_read_cb:    Option<RpvReadCallback>,
-    read_memory_cb: Option<ReadMemoryCallback>,
+    rpvs:        Option<&'static [RuntimePublishedValue]>,
+    rpv_read_cb: Option<RpvReadCallback>,
 }
 
 #[cfg(feature = "datalogging")]
 impl LoopDlRuntime {
     const DEFAULT: Self = Self {
-        owns:           false,
-        data_notified:  false,
-        cell:           ptr::null(),
-        rpvs:           None,
-        rpv_read_cb:    None,
-        read_memory_cb: None,
+        owns:         false,
+        data_notified: false,
+        cell:         ptr::null(),
+        rpvs:         None,
+        rpv_read_cb:  None,
     };
 }
 
 #[cfg(feature = "datalogging")]
 /// Private host implementation built from `LoopDlRuntime` fields.
 struct LoopHost {
-    rpvs:           Option<&'static [RuntimePublishedValue]>,
-    rpv_read_cb:    Option<RpvReadCallback>,
-    read_memory_cb: Option<ReadMemoryCallback>,
+    rpvs:        Option<&'static [RuntimePublishedValue]>,
+    rpv_read_cb: Option<RpvReadCallback>,
 }
 
 #[cfg(feature = "datalogging")]
 impl DataloggerHost for LoopHost {
     unsafe fn read_memory(&self, dst: *mut u8, src: *const u8, count: usize) -> bool {
-        self.read_memory_cb.map_or_else(|| {
-            core::ptr::copy_nonoverlapping(src, dst, count);
-            true
-        }, |cb| cb(dst, src, count))
+        core::ptr::copy_nonoverlapping(src, dst, count);
+        true
     }
 
     fn is_rpv_read_configured(&self) -> bool {
@@ -124,7 +119,7 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None, read_memory_cb: None }),
+            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None }),
             #[cfg(feature = "datalogging")]
             loop2main: IpcMessage::new_std(Loop2MainMsg::DEFAULT),
         }
@@ -144,7 +139,7 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None, read_memory_cb: None }),
+            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None }),
             #[cfg(feature = "datalogging")]
             loop2main: IpcMessage::new_std(Loop2MainMsg::DEFAULT),
         }
@@ -211,13 +206,12 @@ impl LoopHandler {
         if self.main2loop.has_content() && !self.loop2main.has_content() {
             if let Some(msg) = self.main2loop.pop() {
                 match msg {
-                    Main2LoopMsg::TakeOwnership { cell_addr, rpvs, rpv_read_cb, read_memory_cb } => {
+                    Main2LoopMsg::TakeOwnership { cell_addr, rpvs, rpv_read_cb } => {
                         runtime.cell = cell_addr as *const DataLoggerCell;
                         runtime.owns = true;
                         runtime.data_notified = false;
                         runtime.rpvs = rpvs;
                         runtime.rpv_read_cb = rpv_read_cb;
-                        runtime.read_memory_cb = read_memory_cb;
                         self.loop2main.send(Loop2MainMsg {
                             kind: Loop2MainMsgKind::OwnershipTaken,
                             ..Loop2MainMsg::DEFAULT
@@ -241,7 +235,6 @@ impl LoopHandler {
                             runtime.cell = ptr::null();
                             runtime.rpvs = None;
                             runtime.rpv_read_cb = None;
-                            runtime.read_memory_cb = None;
                             self.loop2main.send(Loop2MainMsg {
                                 kind: Loop2MainMsgKind::OwnershipReleased,
                                 ..Loop2MainMsg::DEFAULT
@@ -258,7 +251,6 @@ impl LoopHandler {
             let host = LoopHost {
                 rpvs: runtime.rpvs,
                 rpv_read_cb: runtime.rpv_read_cb,
-                read_memory_cb: runtime.read_memory_cb,
             };
             dl.process(timebase, &host);
 

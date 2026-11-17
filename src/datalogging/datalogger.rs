@@ -63,9 +63,9 @@ struct TriggerState {
 /// Create one per time domain. Call `configure()` when a new acquisition
 /// is requested, `arm_trigger()` to start watching for the trigger, and
 /// `process()` on every loop tick.
-pub struct DataLogger<'buf> {
+pub struct DataLogger {
     config: Configuration,
-    encoder: RawFormatEncoder<'buf>,
+    encoder: RawFormatEncoder,
     buffer_size: usize,
     trigger_callback: Option<fn()>,
     trigger_timestamp: Timestamp,
@@ -83,17 +83,18 @@ pub struct DataLogger<'buf> {
     ops_data: [AnyValAndTypePair; MAX_OPERANDS],
 }
 
-impl<'buf> DataLogger<'buf> {
-    /// Creates a new `DataLogger` backed by `buffer`.
-    /// Optionally registers a callback that is invoked (synchronously, in the caller's context)
-    /// the moment the trigger fires.
+impl DataLogger {
+    /// Creates a new `DataLogger` backed by the given raw buffer.
+    ///
+    /// # Safety
+    /// `buffer` must be valid for `buffer_len` bytes for the lifetime of this `DataLogger`.
     #[must_use]
-    pub fn new(buffer: &'buf mut [u8], trigger_callback: Option<fn()>) -> Self {
-        let buffer_size = buffer.len();
+    pub unsafe fn new(buffer: *mut u8, buffer_len: usize, trigger_callback: Option<fn()>) -> Self {
         let mut dl = Self {
             config: Configuration::DEFAULT,
-            encoder: RawFormatEncoder::new(buffer),
-            buffer_size,
+            // Safety: forwarded from caller.
+            encoder: unsafe { RawFormatEncoder::new(buffer, buffer_len) },
+            buffer_size: buffer_len,
             trigger_callback,
             trigger_timestamp: 0,
             trigger_cursor_location: 0,
@@ -450,14 +451,14 @@ impl<'buf> DataLogger<'buf> {
 
     /// Mutable access to the encoder (which also embeds the reader state).
     #[inline]
-    pub const fn get_encoder_mut(&mut self) -> &mut RawFormatEncoder<'buf> {
+    pub const fn get_encoder_mut(&mut self) -> &mut RawFormatEncoder {
         &mut self.encoder
     }
 
     /// Immutable access to the encoder.
     #[must_use]
     #[inline]
-    pub const fn get_encoder(&self) -> &RawFormatEncoder<'buf> {
+    pub const fn get_encoder(&self) -> &RawFormatEncoder {
         &self.encoder
     }
 

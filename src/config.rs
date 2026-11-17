@@ -4,9 +4,6 @@ use crate::types::{AnyType, RuntimePublishedValue};
 #[cfg(feature = "protected_regions")]
 use crate::types::AddressRange;
 
-#[cfg(feature = "datalogging")]
-use crate::datalogging::DataLoggerCell;
-
 /// Callback to read a Runtime Published Value.
 pub type RpvReadCallback = fn(RuntimePublishedValue, &mut AnyType) -> bool;
 
@@ -20,6 +17,10 @@ pub type UserCommandCallback = fn(u8, &[u8], &mut [u8], &mut u16);
 #[cfg(feature = "datalogging")]
 /// Callback triggered when a datalogging acquisition fires.
 pub type DataloggingTriggerCallback = fn();
+
+#[cfg(feature = "datalogging")]
+/// Datalogger buffer descriptor returned by `Config::take_datalogger_buf`.
+pub(crate) type DataloggerBufDesc = (*mut u8, usize, Option<DataloggingTriggerCallback>);
 
 /// Runtime configuration handed to `MainHandler` at startup.
 ///
@@ -41,7 +42,11 @@ pub struct Config<'rxbuf, 'txbuf> {
     loops: Option<&'static [LoopHandler]>,
 
     #[cfg(feature = "datalogging")]
-    datalogger_cell: Option<&'static DataLoggerCell<'static>>,
+    datalogger_buf: *mut u8,
+    #[cfg(feature = "datalogging")]
+    datalogger_buf_len: usize,
+    #[cfg(feature = "datalogging")]
+    datalogger_trigger_cb: Option<fn()>,
 
     user_command_callback: Option<UserCommandCallback>,
 
@@ -71,7 +76,11 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
             rpv_write_callback: None,
             loops: None,
             #[cfg(feature = "datalogging")]
-            datalogger_cell: None,
+            datalogger_buf: core::ptr::null_mut(),
+            #[cfg(feature = "datalogging")]
+            datalogger_buf_len: 0,
+            #[cfg(feature = "datalogging")]
+            datalogger_trigger_cb: None,
             user_command_callback: None,
             max_bitrate: 0,
             session_counter_seed: 0,
@@ -94,7 +103,11 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
         self.rpv_write_callback = None;
         self.loops = None;
         #[cfg(feature = "datalogging")]
-        { self.datalogger_cell = None; }
+        {
+            self.datalogger_buf = core::ptr::null_mut();
+            self.datalogger_buf_len = 0;
+            self.datalogger_trigger_cb = None;
+        }
         self.user_command_callback = None;
         self.max_bitrate = 0;
         self.session_counter_seed = 0;
@@ -218,31 +231,37 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
         self.loops.map_or(0, |s| u8::try_from(s.len()).unwrap_or(u8::MAX))
     }
 
-    /// Registers the `DataLoggerCell` for use by the datalogging subsystem.
+    /// Registers a raw buffer for use by the datalogging subsystem.
+    ///
+    /// # Safety
+    /// `buf` must be valid for `len` bytes and must outlive the `MainHandler` created from this config.
     #[cfg(feature = "datalogging")]
-    pub const fn set_datalogger(&mut self, cell: &'static DataLoggerCell<'static>) {
-        self.datalogger_cell = Some(cell);
+    pub unsafe fn set_datalogger_buffer(&mut self, buf: *mut u8, len: usize, trigger_cb: Option<fn()>) {
+        self.datalogger_buf = buf;
+        self.datalogger_buf_len = len;
+        self.datalogger_trigger_cb = trigger_cb;
     }
 
-    /// Returns `true` if a `DataLoggerCell` has been registered.
+    /// Returns `true` if a datalogger buffer has been configured.
     #[cfg(feature = "datalogging")]
     #[must_use]
     pub const fn is_datalogging_configured(&self) -> bool {
-        self.datalogger_cell.is_some()
+        !self.datalogger_buf.is_null() && self.datalogger_buf_len > 0
     }
 
-    /// Returns `true` if at least one loop has datalogging enabled.
+    /// Moves the datalogger buffer configuration out of the config; used by `MainHandler` during initialization.
     #[cfg(feature = "datalogging")]
-    #[must_use]
-    pub fn has_at_least_one_loop_with_datalogging(&self) -> bool {
-        self.loops.is_some_and(|loops| loops.iter().any(LoopHandler::datalogging_allowed))
-    }
-
-    /// Returns the registered `DataLoggerCell`, or `None`.
-    #[cfg(feature = "datalogging")]
-    #[must_use]
-    pub(crate) const fn get_datalogger_cell(&self) -> Option<&'static DataLoggerCell<'static>> {
-        self.datalogger_cell
+    pub(crate) fn take_datalogger_buf(&mut self) -> Option<DataloggerBufDesc> {
+        if self.datalogger_buf.is_null() || self.datalogger_buf_len == 0 {
+            return None;
+        }
+        let buf = self.datalogger_buf;
+        let len = self.datalogger_buf_len;
+        let cb = self.datalogger_trigger_cb;
+        self.datalogger_buf = core::ptr::null_mut();
+        self.datalogger_buf_len = 0;
+        self.datalogger_trigger_cb = None;
+        Some((buf, len, cb))
     }
 
     /// Returns the RPV read callback, or `None` if unset.

@@ -8,6 +8,8 @@ use crate::datalogging::{DataLoggerCell, DataloggerHost, State};
 use crate::ipc::{IpcMessage, Loop2MainMsg, Loop2MainMsgKind, Main2LoopMsg, StdAtomicFlag};
 #[cfg(feature = "datalogging")]
 use crate::timebase::Timebase;
+#[cfg(feature = "datalogging")]
+use core::ptr;
 
 /// Loop type: fixed frequency or variable frequency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,11 +26,13 @@ pub enum LoopType {
 struct LoopDlRuntime {
     owns: bool,
     data_notified: bool,
+    /// Address of the `DataLoggerCell` received via `TakeOwnership` IPC; null when not owned.
+    cell: *const DataLoggerCell,
 }
 
 #[cfg(feature = "datalogging")]
 impl LoopDlRuntime {
-    const DEFAULT: Self = Self { owns: false, data_notified: false };
+    const DEFAULT: Self = Self { owns: false, data_notified: false, cell: ptr::null() };
 }
 
 /// Describes a time domain in which scrutiny-related probing can occur.
@@ -72,7 +76,7 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership),
+            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0 }),
             #[cfg(feature = "datalogging")]
             loop2main: IpcMessage::new_std(Loop2MainMsg::DEFAULT),
         }
@@ -92,7 +96,7 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership),
+            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0 }),
             #[cfg(feature = "datalogging")]
             loop2main: IpcMessage::new_std(Loop2MainMsg::DEFAULT),
         }
@@ -146,15 +150,13 @@ impl LoopHandler {
     /// Must be called on every loop tick. Advances the timebase, handles IPC messages,
     /// and drives the datalogger state machine.
     ///
-    /// `cell` should be `Some` when this loop has datalogging enabled and the application
-    /// has a `DataLoggerCell` to offer. `host` provides memory-read and RPV access.
+    /// `host` provides memory-read and RPV access.
     #[cfg(feature = "datalogging")]
-    pub fn process(&self, timestep: Timediff, cell: Option<&DataLoggerCell<'_>>, host: &dyn DataloggerHost) {
+    pub fn process(&self, timestep: Timediff, host: &dyn DataloggerHost) {
         // SAFETY: only this loop task writes `timebase` and `dl_runtime`.
         let timebase = unsafe { &mut *self.timebase.get() };
         timebase.step(timestep);
 
-        let Some(cell) = cell else { return };
         if !self.datalogging_allowed { return; }
 
         let runtime = unsafe { &mut *self.dl_runtime.get() };
@@ -163,7 +165,8 @@ impl LoopHandler {
         if self.main2loop.has_content() && !self.loop2main.has_content() {
             if let Some(msg) = self.main2loop.pop() {
                 match msg {
-                    Main2LoopMsg::TakeOwnership => {
+                    Main2LoopMsg::TakeOwnership { cell_addr } => {
+                        runtime.cell = cell_addr as *const DataLoggerCell;
                         runtime.owns = true;
                         runtime.data_notified = false;
                         self.loop2main.send(Loop2MainMsg {
@@ -172,19 +175,21 @@ impl LoopHandler {
                         });
                     }
                     Main2LoopMsg::ArmTrigger => {
-                        if runtime.owns {
+                        if runtime.owns && !runtime.cell.is_null() {
                             // SAFETY: we own the datalogger per IPC protocol.
-                            unsafe { cell.get() }.arm_trigger();
+                            unsafe { (*runtime.cell).get() }.arm_trigger();
                         }
                     }
                     Main2LoopMsg::DisarmTrigger => {
-                        if runtime.owns {
-                            unsafe { cell.get() }.disarm_trigger();
+                        if runtime.owns && !runtime.cell.is_null() {
+                            // SAFETY: we own the datalogger per IPC protocol.
+                            unsafe { (*runtime.cell).get() }.disarm_trigger();
                         }
                     }
                     Main2LoopMsg::ReleaseOwnership => {
                         if runtime.owns {
                             runtime.owns = false;
+                            runtime.cell = ptr::null();
                             self.loop2main.send(Loop2MainMsg {
                                 kind: Loop2MainMsgKind::OwnershipReleased,
                                 ..Loop2MainMsg::DEFAULT
@@ -195,9 +200,9 @@ impl LoopHandler {
             }
         }
 
-        if runtime.owns {
+        if runtime.owns && !runtime.cell.is_null() {
             // SAFETY: we own the datalogger per IPC protocol.
-            let dl = unsafe { cell.get() };
+            let dl = unsafe { (*runtime.cell).get() };
             dl.process(timebase, host);
 
             if !self.loop2main.has_content() {

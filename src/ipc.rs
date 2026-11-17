@@ -103,7 +103,8 @@ impl<T: Copy> IpcMessage<T, StdAtomicFlag> {
 /// Messages the main handler sends to a loop handler.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Main2LoopMsg {
-    TakeOwnership,
+    /// `cell_addr` is the `*const DataLoggerCell` cast to `usize` to stay `Send`.
+    TakeOwnership { cell_addr: usize },
     ReleaseOwnership,
     ArmTrigger,
     DisarmTrigger,

@@ -138,7 +138,7 @@ pub struct MainHandler<'rxbuf, 'txbuf> {
     process_again_timestamp: Timestamp,
     process_again_timestamp_taken: bool,
     #[cfg(feature = "datalogging")]
-    datalogger_cell: Option<&'static DataLoggerCell<'static>>,
+    datalogger_cell: Option<DataLoggerCell>,
     #[cfg(feature = "datalogging")]
     dl: DataloggingState,
 }
@@ -163,7 +163,19 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         #[cfg(feature = "protected_regions")]
         let readonly_ranges = config.readonly_ranges();
         #[cfg(feature = "datalogging")]
-        let datalogger_cell = config.get_datalogger_cell();
+        let datalogger_cell = {
+            let has_dl_loop = loops.is_some_and(|l| l.iter().any(LoopHandler::datalogging_allowed));
+            if let Some((buf, len, cb)) = config.take_datalogger_buf() {
+                if has_dl_loop {
+                    // Safety: caller guarantees buf is valid for len bytes and outlives this handler.
+                    Some(unsafe { DataLoggerCell::new(buf, len, cb) })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
 
         let comm = CommHandler::new(rx_buf, tx_buf, seed);
         let enabled = comm.is_enabled();
@@ -205,7 +217,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             self.process_again_timestamp_taken = false;
             self.comm.reset(&self.timebase);
             #[cfg(feature = "datalogging")]
-            if let Some(cell) = self.datalogger_cell {
+            if let Some(ref cell) = self.datalogger_cell {
                 // Safety: no loop owns the datalogger when handler is disabled.
                 unsafe { cell.get() }.reset();
             }
@@ -355,7 +367,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 }
                 self.dl.owner = None;
                 self.dl.pending_release = false;
-                if let Some(cell) = self.datalogger_cell {
+                if let Some(ref cell) = self.datalogger_cell {
                     // Safety: no loop owns the datalogger after release.
                     unsafe { cell.get() }.reset();
                 }
@@ -384,7 +396,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
 
         if self.dl.owner.is_none() {
             // When no loop owns the datalogger we can read state directly.
-            if let Some(cell) = self.datalogger_cell {
+            if let Some(ref cell) = self.datalogger_cell {
                 // Safety: no loop owns the datalogger.
                 self.dl.cached_state = unsafe { cell.get() }.get_state();
             }
@@ -392,8 +404,11 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             if let Some(new_owner_idx) = self.dl.pending_new_owner {
                 let loop_handler = &loops[new_owner_idx as usize];
                 if !loop_handler.main2loop().has_content() {
-                    loop_handler.main2loop().send(Main2LoopMsg::TakeOwnership);
-                    self.dl.pending_new_owner = None;
+                    if let Some(ref cell) = self.datalogger_cell {
+                        let cell_addr = core::ptr::from_ref::<DataLoggerCell>(cell) as usize;
+                        loop_handler.main2loop().send(Main2LoopMsg::TakeOwnership { cell_addr });
+                        self.dl.pending_new_owner = None;
+                    }
                 }
             }
 
@@ -421,8 +436,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
     fn dispatch(&mut self, cmd_id: u8, subfn_id: u8, data_len: usize) -> ResponseCode {
         let data = &self.rx_buf[..data_len];
         #[cfg(feature = "datalogging")]
-        let dl_enabled = self.datalogger_cell.is_some()
-            && self.loops.is_some_and(|l| l.iter().any(LoopHandler::datalogging_allowed));
+        let dl_enabled = self.datalogger_cell.is_some();
         #[cfg(not(feature = "datalogging"))]
         let dl_enabled = false;
         match CommandId::try_from(cmd_id) {
@@ -470,7 +484,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             Ok(CommandId::DataLogControl) => ResponseCode::UnsupportedFeature,
             #[cfg(feature = "datalogging")]
             Ok(CommandId::DataLogControl) => {
-                let Some(cell) = self.datalogger_cell else {
+                let Some(cell) = self.datalogger_cell.as_ref() else {
                     return ResponseCode::UnsupportedFeature;
                 };
                 Self::process_datalog_control(
@@ -924,7 +938,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         loops: Option<&'static [LoopHandler]>,
         rpvs: Option<&'static [RuntimePublishedValue]>,
         rpv_read_callback: Option<RpvReadCallback>,
-        cell: &'static DataLoggerCell<'static>,
+        cell: &DataLoggerCell,
         dl: &mut DataloggingState,
         #[cfg(feature = "protected_regions")] forbidden_ranges: Option<&'static [AddressRange]>,
         subfn_id: u8,

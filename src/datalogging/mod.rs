@@ -19,21 +19,25 @@ use core::cell::UnsafeCell;
 ///
 /// Access is guarded by the IPC ownership protocol: only the holder of the
 /// ownership token (enforced by `Main2LoopMsg`/`Loop2MainMsg`) may call `get()`.
-pub struct DataLoggerCell<'buf>(UnsafeCell<DataLogger<'buf>>);
+pub(crate) struct DataLoggerCell(UnsafeCell<DataLogger>);
 
 // SAFETY: `DataLogger` is only accessed while the caller holds the IPC ownership
 // token. The protocol ensures mutual exclusion between the main task and the loop task.
-unsafe impl Sync for DataLoggerCell<'_> {}
+unsafe impl Sync for DataLoggerCell {}
 
-impl<'buf> DataLoggerCell<'buf> {
-    /// Creates a new cell backed by `buf`. Pass `trigger_callback` to be notified on trigger.
-    pub fn new(buf: &'buf mut [u8], trigger_callback: Option<fn()>) -> Self {
-        Self(UnsafeCell::new(DataLogger::new(buf, trigger_callback)))
+impl DataLoggerCell {
+    /// Creates a new cell backed by the given raw buffer. Pass `trigger_callback` to be notified on trigger.
+    ///
+    /// # Safety
+    /// `buf` must be valid for `len` bytes for the lifetime of this `DataLoggerCell`.
+    pub(crate) unsafe fn new(buf: *mut u8, len: usize, trigger_callback: Option<fn()>) -> Self {
+        // Safety: forwarded from caller.
+        Self(UnsafeCell::new(unsafe { DataLogger::new(buf, len, trigger_callback) }))
     }
 
     /// Returns the total byte capacity of the acquisition buffer.
     /// Safe to call without ownership — `buffer_size` is set once at construction.
-    pub fn buffer_size(&self) -> usize {
+    pub(crate) fn buffer_size(&self) -> usize {
         // SAFETY: buffer_size is a plain usize written once at construction and never changed.
         unsafe { (*self.0.get()).buffer_size() }
     }
@@ -44,7 +48,7 @@ impl<'buf> DataLoggerCell<'buf> {
     /// Caller must hold the IPC ownership token (no other task may be calling methods
     /// on the same cell concurrently).
     #[allow(clippy::mut_from_ref)]
-    pub(crate) unsafe fn get(&self) -> &mut DataLogger<'buf> {
+    pub(crate) unsafe fn get(&self) -> &mut DataLogger {
         &mut *self.0.get()
     }
 }

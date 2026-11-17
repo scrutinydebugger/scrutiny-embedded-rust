@@ -91,7 +91,8 @@ fn trigger_basics() {
     let logged_var: f32 = 0.0;
     let mut dl_buf = [0u8; 128];
 
-    let mut dl = DataLogger::new(&mut dl_buf, None);
+    // Safety: dl_buf outlives dl.
+    let mut dl = unsafe { DataLogger::new(dl_buf.as_mut_ptr(), dl_buf.len(), None) };
     {
         let cfg = dl.config_mut();
         *cfg = Configuration::DEFAULT;
@@ -134,7 +135,8 @@ fn trigger_hold_time() {
     let logged_var: f32 = 0.0;
     let mut dl_buf = [0u8; 128];
 
-    let mut dl = DataLogger::new(&mut dl_buf, None);
+    // Safety: dl_buf outlives dl.
+    let mut dl = unsafe { DataLogger::new(dl_buf.as_mut_ptr(), dl_buf.len(), None) };
     {
         let cfg = dl.config_mut();
         *cfg = Configuration::DEFAULT;
@@ -184,7 +186,8 @@ fn configure_rejects_varbit_with_bitsize_zero() {
     let dummy: u32 = 0;
     let mut dl_buf = [0u8; 128];
 
-    let mut dl = DataLogger::new(&mut dl_buf, None);
+    // Safety: dl_buf outlives dl.
+    let mut dl = unsafe { DataLogger::new(dl_buf.as_mut_ptr(), dl_buf.len(), None) };
     {
         let cfg = dl.config_mut();
         *cfg = Configuration::DEFAULT;
@@ -225,7 +228,8 @@ fn basic_acquisition() {
 
     TRIGGER_CB_COUNT.store(0, core::sync::atomic::Ordering::Relaxed);
 
-    let mut dl = DataLogger::new(&mut dl_buf, Some(trigger_callback));
+    // Safety: dl_buf outlives dl.
+    let mut dl = unsafe { DataLogger::new(dl_buf.as_mut_ptr(), dl_buf.len(), Some(trigger_callback)) };
     {
         let cfg = dl.config_mut();
         *cfg = Configuration::DEFAULT;
@@ -291,7 +295,8 @@ fn always_use_full_buffer() {
         var2 = 0;
         let probe_location = probe_loop as u8;
 
-        let mut dl = DataLogger::new(&mut dl_buf, None);
+        // Safety: dl_buf outlives dl.
+    let mut dl = unsafe { DataLogger::new(dl_buf.as_mut_ptr(), dl_buf.len(), None) };
         {
             let cfg = dl.config_mut();
             *cfg = Configuration::DEFAULT;
@@ -351,7 +356,8 @@ fn acquire_time_correctly() {
     let mut out_buf = [0u8; 256];
     let max_loops = dl_buf.len() * 8;
 
-    let mut dl = DataLogger::new(&mut dl_buf, None);
+    // Safety: dl_buf outlives dl.
+    let mut dl = unsafe { DataLogger::new(dl_buf.as_mut_ptr(), dl_buf.len(), None) };
     {
         let cfg = dl.config_mut();
         *cfg = Configuration::DEFAULT;
@@ -430,7 +436,8 @@ fn complex_acquisition() {
         RPV_1000_VAL.store(0, core::sync::atomic::Ordering::Relaxed);
         let probe_location = probe_loop as u8;
 
-        let mut dl = DataLogger::new(&mut dl_buf, None);
+        // Safety: dl_buf outlives dl.
+    let mut dl = unsafe { DataLogger::new(dl_buf.as_mut_ptr(), dl_buf.len(), None) };
         {
             let cfg = dl.config_mut();
             *cfg = Configuration::DEFAULT;

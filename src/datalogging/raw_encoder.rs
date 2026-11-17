@@ -3,8 +3,9 @@ use crate::types::{AnyType, Timestamp, VariableType};
 
 /// Encodes acquisition samples into a fixed-size circular byte buffer.
 /// The reader cursor state is embedded here to avoid a self-referential struct.
-pub struct RawFormatEncoder<'buf> {
-    buffer: &'buf mut [u8],
+pub struct RawFormatEncoder {
+    buffer: *mut u8,
+    buffer_len: usize,
     max_entries: usize,
     next_entry_write_index: usize,
     first_valid_entry_index: usize,
@@ -20,12 +21,16 @@ pub struct RawFormatEncoder<'buf> {
     reader_finished: bool,
 }
 
-impl<'buf> RawFormatEncoder<'buf> {
-    /// Creates a new encoder wrapping the given buffer.
+impl RawFormatEncoder {
+    /// Creates a new encoder backed by the given raw buffer.
+    ///
+    /// # Safety
+    /// `buffer` must be valid for `buffer_len` bytes for the lifetime of the encoder.
     /// Call `reset()` with a valid configuration before first use.
-    pub const fn new(buffer: &'buf mut [u8]) -> Self {
+    pub const unsafe fn new(buffer: *mut u8, buffer_len: usize) -> Self {
         Self {
             buffer,
+            buffer_len,
             max_entries: 0,
             next_entry_write_index: 0,
             first_valid_entry_index: 0,
@@ -54,7 +59,7 @@ impl<'buf> RawFormatEncoder<'buf> {
         self.full = false;
         self.max_entries = 0;
 
-        if self.buffer.is_empty() {
+        if self.buffer_len == 0 {
             self.error = true;
             return;
         }
@@ -83,7 +88,7 @@ impl<'buf> RawFormatEncoder<'buf> {
             }
         }
 
-        if let Some(n) = self.buffer.len().checked_div(self.entry_size) {
+        if let Some(n) = self.buffer_len.checked_div(self.entry_size) {
             self.max_entries = n;
         } else {
             self.error = true;
@@ -120,9 +125,10 @@ impl<'buf> RawFormatEncoder<'buf> {
             match config.items_to_log[i] {
                 LoggableItem::Memory { address, size } => {
                     let count = size as usize;
-                    // Safety: the caller is responsible for the address being valid.
+                    // Safety: buffer is valid for buffer_len bytes (encoder invariant);
+                    // cursor+count is within bounds because entry_size was validated in reset().
                     unsafe {
-                        host.read_memory(self.buffer[cursor..cursor + count].as_mut_ptr(), address, count);
+                        host.read_memory(self.buffer.add(cursor), address, count);
                     }
                     cursor += count;
                 }
@@ -135,12 +141,17 @@ impl<'buf> RawFormatEncoder<'buf> {
                     if !host.read_rpv(rpv, &mut val) {
                         val = AnyType { uint32: 0 };
                     }
-                    let written = encode_anytype_be(val, rpv.var_type, &mut self.buffer[cursor..]);
+                    // Safety: buffer valid; remaining capacity validated in reset().
+                    let dst = unsafe { core::slice::from_raw_parts_mut(self.buffer.add(cursor), self.buffer_len - cursor) };
+                    let written = encode_anytype_be(val, rpv.var_type, dst);
                     cursor += written;
                 }
                 LoggableItem::Time => {
                     let ts_bytes = timebase_ts.to_be_bytes();
-                    self.buffer[cursor..cursor + 4].copy_from_slice(&ts_bytes);
+                    // Safety: buffer valid; 4 bytes fit within entry boundary.
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(ts_bytes.as_ptr(), self.buffer.add(cursor), 4);
+                    }
                     cursor += core::mem::size_of::<Timestamp>();
                 }
             }
@@ -300,8 +311,14 @@ impl<'buf> RawFormatEncoder<'buf> {
                 break;
             }
 
-            out[out_written..out_written + transfer]
-                .copy_from_slice(&self.buffer[self.reader_cursor..self.reader_cursor + transfer]);
+            // Safety: reader_cursor+transfer is within buffer_len (validated above).
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    self.buffer.add(self.reader_cursor),
+                    out[out_written..].as_mut_ptr(),
+                    transfer,
+                );
+            }
 
             self.reader_cursor += transfer;
             self.reader_started = true;

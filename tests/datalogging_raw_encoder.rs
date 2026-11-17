@@ -53,7 +53,8 @@ fn basic_encoding() {
     };
     cfg.items_to_log[2] = LoggableItem::Time;
 
-    let mut enc = RawFormatEncoder::new(&mut buf);
+    // Safety: buf outlives enc.
+    let mut enc = unsafe { RawFormatEncoder::new(buf.as_mut_ptr(), buf.len()) };
     enc.reset(&cfg, &host);
     assert!(!enc.error());
 
@@ -111,7 +112,7 @@ fn rpv_callback_failure_zeros_entry() {
     cfg.items_count = 1;
     cfg.items_to_log[0] = LoggableItem::Rpv { id: TEST_RPV.id };
 
-    let mut enc = RawFormatEncoder::new(&mut buf);
+    let mut enc = unsafe { RawFormatEncoder::new(buf.as_mut_ptr(), buf.len()) };
     enc.reset(&cfg, &host);
     assert!(!enc.error());
 
@@ -134,7 +135,8 @@ fn buffer_too_small_for_single_entry() {
 
     // Buffer holds only 4 bytes — not enough for one 8-byte entry.
     let mut small_buf = [0u8; 4];
-    let mut enc = RawFormatEncoder::new(&mut small_buf);
+    // Safety: small_buf outlives enc.
+    let mut enc = unsafe { RawFormatEncoder::new(small_buf.as_mut_ptr(), small_buf.len()) };
     enc.reset(&cfg, &host);
     assert!(enc.error());
 

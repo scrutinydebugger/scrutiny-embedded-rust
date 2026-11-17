@@ -300,6 +300,26 @@ fn test_unsupported() {
     }
 }
 
+// Without a datalogging buffer, the state getter reports Idle and no error, like C++.
+#[test]
+fn test_getters_without_datalogging_buffer() {
+    static NO_BUF_LOOPS: [LoopHandler; 1] = [LoopHandler::fixed_freq("L", 100).with_datalogging()];
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_loops(&NO_BUF_LOOPS);
+    let mut h = MainHandler::new(cfg).unwrap();
+
+    assert_eq!(h.get_datalogger_state(), DlState::Idle);
+    assert!(!h.datalogging_error());
+    h.process(0);
+    NO_BUF_LOOPS[0].process(0);
+    h.process(0);
+    assert_eq!(h.get_datalogger_state(), DlState::Idle);
+    assert!(!h.datalogging_error());
+}
+
 #[test]
 fn test_get_setup() {
     static LOOPS_GET_SETUP: [LoopHandler; 1] = [LoopHandler::fixed_freq("L", 100).with_datalogging()];
@@ -788,6 +808,8 @@ fn test_owner_mechanism() {
 
     // Transfer ownership to loop0
     do_ownership_transfer(&mut h, loop0);
+    assert_eq!(h.get_datalogger_state(), DlState::Configured);
+    assert!(!h.datalogging_error());
 
     // Arm
     do_arm_trigger(&mut h, loop0);

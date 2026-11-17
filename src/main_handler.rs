@@ -354,17 +354,13 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         self.comm.get_session_id()
     }
 
-    /// Returns the last-known datalogger state, or `None` if datalogging is not configured.
+    /// Returns the last-known datalogger state, or `Idle` if datalogging is not configured.
     /// The value reflects the most recent `StatusUpdate`/`DataAcquired` IPC from the owning loop
     /// (or a direct read when no loop owns the datalogger).
     #[cfg(feature = "datalogging")]
     #[must_use]
-    pub const fn datalogging_state(&self) -> Option<DlState> {
-        if self.datalogger_cell.is_some() {
-            Some(self.dl.cached_state)
-        } else {
-            None
-        }
+    pub const fn get_datalogger_state(&self) -> DlState {
+        self.dl.cached_state
     }
 
     /// Returns `true` if an acquisition has completed and data is ready to be read.
@@ -377,7 +373,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
     /// Returns `true` if the datalogger subsystem is in an error state.
     #[cfg(feature = "datalogging")]
     #[must_use]
-    pub const fn datalogging_in_error(&self) -> bool {
+    pub const fn datalogging_error(&self) -> bool {
         if self.datalogger_cell.is_none() {
             return false;
         }

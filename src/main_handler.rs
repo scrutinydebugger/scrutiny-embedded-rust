@@ -1,5 +1,5 @@
 use crate::build_config;
-use crate::config::{Config, RpvReadCallback, RpvWriteCallback};
+use crate::config::{Config, RpvReadCallback, RpvWriteCallback, UserCommandCallback};
 #[cfg(feature = "datalogging")]
 use crate::loop_handler::LoopHandler;
 use crate::protocol::codec_v1_0;
@@ -136,7 +136,7 @@ pub struct MainHandler<'rxbuf, 'txbuf> {
     display_name: &'static str,
     max_bitrate: u32,
     memory_write_enable: bool,
-    user_command_configured: bool,
+    user_command_callback: Option<UserCommandCallback>,
     rpvs: Option<&'static [RuntimePublishedValue]>,
     rpv_read_callback: Option<RpvReadCallback>,
     rpv_write_callback: Option<RpvWriteCallback>,
@@ -163,7 +163,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         let display_name = config.display_name;
         let max_bitrate = config.max_bitrate;
         let memory_write_enable = config.memory_write_enable;
-        let user_command_configured = config.get_user_command_callback().is_some();
+        let user_command_callback = config.get_user_command_callback();
         let rpvs = config.get_rpvs_array();
         let rpv_read_callback = config.get_rpv_read_callback();
         let rpv_write_callback = config.get_rpv_write_callback();
@@ -201,7 +201,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             display_name,
             max_bitrate,
             memory_write_enable,
-            user_command_configured,
+            user_command_callback,
             rpvs,
             rpv_read_callback,
             rpv_write_callback,
@@ -506,7 +506,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 &mut self.comm,
                 &mut *self.tx_buf,
                 self.memory_write_enable,
-                self.user_command_configured,
+                self.user_command_callback.is_some(),
                 self.rpvs,
                 self.loops,
                 #[cfg(feature = "protected_regions")]
@@ -541,7 +541,14 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 subfn_id,
                 data,
             ),
-            Ok(CommandId::UserCommand) | Err(()) => ResponseCode::UnsupportedFeature,
+            Ok(CommandId::UserCommand) => Self::process_user_command(
+                &mut self.comm,
+                &mut *self.tx_buf,
+                self.user_command_callback,
+                subfn_id,
+                data,
+            ),
+            Err(()) => ResponseCode::UnsupportedFeature,
             #[cfg(not(feature = "datalogging"))]
             Ok(CommandId::DataLogControl) => ResponseCode::UnsupportedFeature,
             #[cfg(feature = "datalogging")]
@@ -988,6 +995,29 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
 
             Err(()) => ResponseCode::UnsupportedFeature,
         }
+    }
+
+    // ===== UserCommand =====
+
+    /// Calls the user command callback with the request data and the whole TX buffer as response buffer.
+    fn process_user_command(
+        comm: &mut CommHandler,
+        tx_buf: &mut [u8],
+        callback: Option<UserCommandCallback>,
+        subfn_id: u8,
+        data: &[u8],
+    ) -> ResponseCode {
+        let Some(cb) = callback else {
+            return ResponseCode::UnsupportedFeature;
+        };
+
+        let mut response_len: u16 = 0;
+        cb(subfn_id, data, tx_buf, &mut response_len);
+        if usize::from(response_len) > tx_buf.len() {
+            return ResponseCode::Overflow;
+        }
+        comm.active_response_mut().data_length = response_len;
+        ResponseCode::Ok
     }
 
     // ===== DataLogControl =====

@@ -14,7 +14,10 @@ pub type RpvReadCallback = fn(RuntimePublishedValue, &mut AnyType, Option<&'stat
 pub type RpvWriteCallback = fn(RuntimePublishedValue, &AnyType) -> bool;
 
 /// Callback for the `UserCommand` service.
+///
 /// Arguments: subfunction, `request_data`, `response_data`, `response_data_length`.
+/// The length of `response_data` is the maximum response length; setting a larger
+/// `response_data_length` makes the request fail with `Overflow`.
 pub type UserCommandCallback = fn(u8, &[u8], &mut [u8], &mut u16);
 
 #[cfg(feature = "datalogging")]

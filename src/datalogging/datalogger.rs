@@ -1533,6 +1533,84 @@ mod tests {
     }
 
     #[test]
+    fn convert_to_compare_type_widens() {
+        use crate::types::{IntBiggest, UintBiggest, BIGGEST_SINT, BIGGEST_UINT};
+
+        let mut pair = AnyValAndTypePair::DEFAULT;
+
+        // Sint8 → sign-extend to BIGGEST_SINT
+        pair.valtype = VariableType::Sint8;
+        pair.val = AnyType { sint8: -50 };
+        convert_to_compare_type(&mut pair);
+        assert_eq!(pair.valtype, BIGGEST_SINT);
+        assert_eq!(crate::tools::read_biggest_sint(&pair.val), -50 as IntBiggest);
+
+        // Sint16 → sign-extend
+        pair.valtype = VariableType::Sint16;
+        pair.val = AnyType { sint16: -1000 };
+        convert_to_compare_type(&mut pair);
+        assert_eq!(pair.valtype, BIGGEST_SINT);
+        assert_eq!(crate::tools::read_biggest_sint(&pair.val), -1000 as IntBiggest);
+
+        // Sint32 → sign-extend
+        pair.valtype = VariableType::Sint32;
+        pair.val = AnyType { sint32: -100_000 };
+        convert_to_compare_type(&mut pair);
+        assert_eq!(pair.valtype, BIGGEST_SINT);
+        assert_eq!(crate::tools::read_biggest_sint(&pair.val), -100_000 as IntBiggest);
+
+        // Uint8 → zero-extend to BIGGEST_UINT
+        pair.valtype = VariableType::Uint8;
+        pair.val = AnyType { uint8: 50 };
+        convert_to_compare_type(&mut pair);
+        assert_eq!(pair.valtype, BIGGEST_UINT);
+        assert_eq!(crate::tools::read_biggest_uint(&pair.val), 50 as UintBiggest);
+
+        // Uint16 → zero-extend
+        pair.valtype = VariableType::Uint16;
+        pair.val = AnyType { uint16: 1000 };
+        convert_to_compare_type(&mut pair);
+        assert_eq!(pair.valtype, BIGGEST_UINT);
+        assert_eq!(crate::tools::read_biggest_uint(&pair.val), 1000 as UintBiggest);
+
+        // Uint32 → zero-extend
+        pair.valtype = VariableType::Uint32;
+        pair.val = AnyType { uint32: 100_000 };
+        convert_to_compare_type(&mut pair);
+        assert_eq!(pair.valtype, BIGGEST_UINT);
+        assert_eq!(crate::tools::read_biggest_uint(&pair.val), 100_000 as UintBiggest);
+
+        // Float32 → unchanged
+        pair.valtype = VariableType::Float32;
+        pair.val = AnyType { float32: 3.141_592_6_f32 };
+        convert_to_compare_type(&mut pair);
+        assert_eq!(pair.valtype, VariableType::Float32);
+        assert_eq!(unsafe { pair.val.float32 }, 3.141_592_6_f32);
+
+        #[cfg(feature = "support_64bits")]
+        {
+            pair.valtype = VariableType::Uint64;
+            pair.val = AnyType { uint64: 0x0001_2345_6789_abcd };
+            convert_to_compare_type(&mut pair);
+            assert_eq!(pair.valtype, BIGGEST_UINT);
+            assert_eq!(crate::tools::read_biggest_uint(&pair.val), 0x0001_2345_6789_abcd_u64);
+
+            pair.valtype = VariableType::Sint64;
+            pair.val = AnyType { sint64: -0x0001_2345_6789_abcd };
+            convert_to_compare_type(&mut pair);
+            assert_eq!(pair.valtype, BIGGEST_SINT);
+            assert_eq!(crate::tools::read_biggest_sint(&pair.val), -0x0001_2345_6789_abcd_i64);
+
+            // Float64 → truncated to Float32
+            pair.valtype = VariableType::Float64;
+            pair.val = AnyType { float64: f64::from(3.141_592_6_f32) };
+            convert_to_compare_type(&mut pair);
+            assert_eq!(pair.valtype, VariableType::Float32);
+            assert_eq!(unsafe { pair.val.float32 }, 3.141_592_6_f32);
+        }
+    }
+
+    #[test]
     fn fetch_bitfield_limits() {
         let host = FetchTestHost;
         let store = [0i32; 4];

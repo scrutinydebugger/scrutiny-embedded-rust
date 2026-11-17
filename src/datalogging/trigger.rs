@@ -253,6 +253,286 @@ pub fn is_within_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]
 
 // ── Condition LUT ─────────────────────────────────────────────────────────────
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{AnyType, IntBiggest, UintBiggest, BIGGEST_SINT, BIGGEST_UINT};
+
+    fn fp(f: f32) -> AnyValAndTypePair {
+        AnyValAndTypePair { val: AnyType { float32: f }, valtype: crate::types::VariableType::Float32 }
+    }
+
+    fn up(u: UintBiggest) -> AnyValAndTypePair {
+        let mut val = AnyType { uint32: 0 };
+        crate::tools::set_biggest_uint(&mut val, u);
+        AnyValAndTypePair { val, valtype: BIGGEST_UINT }
+    }
+
+    fn sp(s: IntBiggest) -> AnyValAndTypePair {
+        let mut val = AnyType { uint32: 0 };
+        crate::tools::set_biggest_sint(&mut val, s);
+        AnyValAndTypePair { val, valtype: BIGGEST_SINT }
+    }
+
+    fn csd() -> ConditionSharedData { ConditionSharedData::DEFAULT }
+
+    #[test]
+    fn always_true() {
+        assert!(always_true_eval(&mut csd(), &[]));
+    }
+
+    #[test]
+    fn operator_eq() {
+        let mut cd = csd();
+        assert!(!equal_eval(&mut cd, &[fp(0.4), fp(0.5)]));
+        assert!( equal_eval(&mut cd, &[fp(0.5), fp(0.5)]));
+    }
+
+    #[test]
+    fn operator_neq() {
+        let mut cd = csd();
+        assert!(!not_equal_eval(&mut cd, &[fp(0.5), fp(0.5)]));
+        assert!( not_equal_eval(&mut cd, &[fp(0.4), fp(0.5)]));
+    }
+
+    #[test]
+    fn operator_gt() {
+        let mut cd = csd();
+        assert!(!greater_than_eval(&mut cd, &[fp(0.4), fp(0.5)]));
+        assert!(!greater_than_eval(&mut cd, &[fp(0.5), fp(0.5)]));
+        assert!( greater_than_eval(&mut cd, &[fp(0.6), fp(0.5)]));
+    }
+
+    #[test]
+    fn operator_get() {
+        let mut cd = csd();
+        assert!(!greater_or_equal_than_eval(&mut cd, &[fp(0.4), fp(0.5)]));
+        assert!( greater_or_equal_than_eval(&mut cd, &[fp(0.5), fp(0.5)]));
+        assert!( greater_or_equal_than_eval(&mut cd, &[fp(0.6), fp(0.5)]));
+    }
+
+    #[test]
+    fn operator_lt() {
+        let mut cd = csd();
+        assert!(!less_than_eval(&mut cd, &[fp(0.6), fp(0.5)]));
+        assert!(!less_than_eval(&mut cd, &[fp(0.5), fp(0.5)]));
+        assert!( less_than_eval(&mut cd, &[fp(0.4), fp(0.5)]));
+    }
+
+    #[test]
+    fn operator_let() {
+        let mut cd = csd();
+        assert!(!less_or_equal_than_eval(&mut cd, &[fp(0.6), fp(0.5)]));
+        assert!( less_or_equal_than_eval(&mut cd, &[fp(0.5), fp(0.5)]));
+        assert!( less_or_equal_than_eval(&mut cd, &[fp(0.4), fp(0.5)]));
+    }
+
+    #[test]
+    fn equality_all_types() {
+        let mut cd = csd();
+        for swap in [false, true] {
+            let p = |a: AnyValAndTypePair, b: AnyValAndTypePair| -> [AnyValAndTypePair; 2] {
+                if swap { [b, a] } else { [a, b] }
+            };
+            assert!(!equal_eval(&mut cd, &p(fp(0.5), fp(0.6))));
+            assert!( equal_eval(&mut cd, &p(fp(0.5), fp(0.5))));
+            assert!(!equal_eval(&mut cd, &p(up(2), fp(2.1))));
+            assert!( equal_eval(&mut cd, &p(up(2), fp(2.0))));
+            assert!(!equal_eval(&mut cd, &p(sp(2), fp(2.1))));
+            assert!( equal_eval(&mut cd, &p(sp(2), fp(2.0))));
+            assert!(!equal_eval(&mut cd, &p(sp(2), up(3))));
+            assert!( equal_eval(&mut cd, &p(sp(2), up(2))));
+            assert!(!equal_eval(&mut cd, &p(up(2), up(3))));
+            assert!( equal_eval(&mut cd, &p(up(2), up(2))));
+            assert!(!equal_eval(&mut cd, &p(sp(2), sp(3))));
+            assert!( equal_eval(&mut cd, &p(sp(2), sp(2))));
+            // sint(-1) must not equal uint(MAX): different signs
+            assert!(!equal_eval(&mut cd, &p(sp(-1), up(UintBiggest::MAX))));
+        }
+    }
+
+    #[test]
+    fn lt_mixed_sign_and_types() {
+        let mut cd = csd();
+        for swap in [false, true] {
+            let p = |a: AnyValAndTypePair, b: AnyValAndTypePair| -> [AnyValAndTypePair; 2] {
+                if swap { [b, a] } else { [a, b] }
+            };
+            let exp = |n: bool| if swap { !n } else { n };
+
+            assert_eq!(less_than_eval(&mut cd, &p(fp(1.0),  sp(-5))),              exp(false));
+            assert_eq!(less_than_eval(&mut cd, &p(fp(-6.0), sp(-5))),              exp(true));
+            assert_eq!(less_than_eval(&mut cd, &p(fp(-1.0), up(0))),               exp(true));
+            assert_eq!(less_than_eval(&mut cd, &p(sp(-6),   sp(-5))),              exp(true));
+            assert_eq!(less_than_eval(&mut cd, &p(up(UintBiggest::MAX - 1), sp(-1))), exp(false));
+        }
+    }
+
+    #[test]
+    fn change_more_than_basic() {
+        let mut cd = csd();
+        // Positive threshold
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), fp(5.0)])); // init
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), fp(5.0)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), fp(5.0)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(11.0), fp(5.0)])); // +1 < 5
+        assert!(!change_more_than_eval(&mut cd, &[fp(5.0),  fp(5.0)])); // decrease: ignored
+        assert!( change_more_than_eval(&mut cd, &[fp(10.1), fp(5.0)])); // +5.1 > 5
+        assert!(!change_more_than_eval(&mut cd, &[fp(11.0), fp(5.0)])); // +0.9 < 5
+        assert!( change_more_than_eval(&mut cd, &[fp(20.0), fp(5.0)])); // +9 > 5
+        assert!( change_more_than_eval(&mut cd, &[fp(30.0), fp(5.0)])); // +10 > 5
+
+        // Negative threshold
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), fp(-5.0)])); // init
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), fp(-5.0)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(20.0), fp(-5.0)])); // increase: ignored
+        assert!( change_more_than_eval(&mut cd, &[fp(14.9), fp(-5.0)])); // -5.1 < -5
+        assert!(!change_more_than_eval(&mut cd, &[fp(14.0), fp(-5.0)])); // -0.9 not < -5
+        assert!( change_more_than_eval(&mut cd, &[fp(5.0),  fp(-5.0)])); // -9 < -5
+        assert!( change_more_than_eval(&mut cd, &[fp(-5.0), fp(-5.0)])); // -10 < -5
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn change_more_than_all_types() {
+        let mut cd = csd();
+
+        // ── Float + Sint ────────────────────────────────────────────────────────
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(11.0), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(5.0),  sp(5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(10.1), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(11.0), sp(5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(20.0), sp(5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(30.0), sp(5)]));
+
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), sp(-5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), sp(-5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(20.0), sp(-5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(14.9), sp(-5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(14.0), sp(-5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(5.0),  sp(-5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(-5.0), sp(-5)]));
+
+        // ── Float + Uint ────────────────────────────────────────────────────────
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), up(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), up(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(10.0), up(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(11.0), up(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(5.0),  up(5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(10.1), up(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[fp(11.0), up(5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(20.0), up(5)]));
+        assert!( change_more_than_eval(&mut cd, &[fp(30.0), up(5)]));
+
+        // ── Uint + Uint ─────────────────────────────────────────────────────────
+        let mut v: UintBiggest = UintBiggest::MAX.wrapping_sub(999); // == (uint_biggest_t)-1000
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), up(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[up(v), up(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[up(v), up(5)]));
+        v = v.wrapping_add(1);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), up(5)]));
+        v = v.wrapping_sub(10);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), up(5)]));
+        v = v.wrapping_add(6);
+        assert!( change_more_than_eval(&mut cd, &[up(v), up(5)]));
+        v = v.wrapping_add(2);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), up(5)]));
+        v = v.wrapping_add(6);
+        assert!( change_more_than_eval(&mut cd, &[up(v), up(5)]));
+        v = v.wrapping_add(10);
+        assert!( change_more_than_eval(&mut cd, &[up(v), up(5)]));
+
+        // ── Uint + Sint (positive threshold) ───────────────────────────────────
+        v = UintBiggest::MAX.wrapping_sub(999);
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+        v = v.wrapping_add(1);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+        v = v.wrapping_sub(10);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+        v = v.wrapping_add(6);
+        assert!( change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+        v = v.wrapping_add(4);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+        v = v.wrapping_add(10);
+        assert!( change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+        v = v.wrapping_add(6);
+        assert!( change_more_than_eval(&mut cd, &[up(v), sp(5)]));
+
+        // ── Uint + Sint (negative threshold) ───────────────────────────────────
+        v = UintBiggest::MAX.wrapping_sub(999);
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(-5)]));
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(-5)]));
+        v = v.wrapping_add(20);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(-5)]));
+        v = v.wrapping_sub(6);
+        assert!( change_more_than_eval(&mut cd, &[up(v), sp(-5)]));
+        v = v.wrapping_sub(4);
+        assert!(!change_more_than_eval(&mut cd, &[up(v), sp(-5)]));
+        v = v.wrapping_sub(100);
+        assert!( change_more_than_eval(&mut cd, &[up(v), sp(-5)]));
+        v = v.wrapping_sub(10);
+        assert!( change_more_than_eval(&mut cd, &[up(v), sp(-5)]));
+
+        // ── Sint + Sint (positive threshold) ───────────────────────────────────
+        let mut sv: IntBiggest = -100;
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+        sv += 1;
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+        sv -= 10;
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+        sv += 6;
+        assert!( change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+        sv += 4;
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+        sv += 10;
+        assert!( change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+        sv += 6;
+        assert!( change_more_than_eval(&mut cd, &[sp(sv), sp(5)]));
+
+        // ── Sint + Sint (negative threshold) ───────────────────────────────────
+        sv = -100;
+        change_more_than_reset(&mut cd);
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(-5)]));
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(-5)]));
+        sv += 20;
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(-5)]));
+        sv -= 6;
+        assert!( change_more_than_eval(&mut cd, &[sp(sv), sp(-5)]));
+        sv -= 4;
+        assert!(!change_more_than_eval(&mut cd, &[sp(sv), sp(-5)]));
+        sv -= 100;
+        assert!( change_more_than_eval(&mut cd, &[sp(sv), sp(-5)]));
+        sv -= 10;
+        assert!( change_more_than_eval(&mut cd, &[sp(sv), sp(-5)]));
+    }
+
+    #[test]
+    fn is_within() {
+        let mut cd = csd();
+        assert!(!is_within_eval(&mut cd, &[fp(10.0), fp(5.0),   fp(1.0)])); // |10-5|=5 > 1
+        assert!(!is_within_eval(&mut cd, &[fp(10.0), fp(11.01), fp(1.0)])); // 1.01 > 1
+        assert!( is_within_eval(&mut cd, &[fp(10.0), fp(11.0),  fp(1.0)])); // 1.0 <= 1
+        assert!(!is_within_eval(&mut cd, &[fp(10.0), fp(8.99),  fp(1.0)])); // 1.01 > 1
+        assert!( is_within_eval(&mut cd, &[fp(10.0), fp(9.0),   fp(1.0)])); // 1.0 <= 1
+    }
+}
+
+
 use crate::datalogging::types::SupportedTriggerConditions;
 
 /// Returns the `ActiveCondition` matching `cond`, or `None` for an unknown value.

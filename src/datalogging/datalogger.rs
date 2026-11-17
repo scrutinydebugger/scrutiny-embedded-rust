@@ -7,7 +7,7 @@ use crate::datalogging::types::{
     MAX_OPERANDS,
 };
 use crate::timebase::Timebase;
-use crate::tools::{get_var_type_type, TypeSize};
+use crate::tools::{get_var_type_type, is_supported_type, TypeSize};
 use crate::types::{
     AnyType, IntBiggest, RuntimePublishedValue, Timestamp, UintBiggest, VariableType,
     VariableTypeType, BIGGEST_SINT, BIGGEST_UINT,
@@ -756,37 +756,6 @@ pub fn convert_to_compare_type(pair: &mut AnyValAndTypePair) {
 }
 
 // ── Private free helpers ──────────────────────────────────────────────────────
-
-/// Returns `true` for types the datalogger can safely read and compare.
-pub(crate) const fn is_supported_type(vt: VariableType) -> bool {
-    matches!(
-        vt,
-        VariableType::Boolean
-            | VariableType::Boolean8
-            | VariableType::Sint8
-            | VariableType::Sint16
-            | VariableType::Sint32
-            | VariableType::Uint8
-            | VariableType::Uint16
-            | VariableType::Uint32
-            | VariableType::Float32
-    ) || {
-        cfg_if_64bits_supported(vt)
-    }
-}
-
-#[inline]
-const fn cfg_if_64bits_supported(vt: VariableType) -> bool {
-    #[cfg(feature = "support_64bits")]
-    {
-        matches!(vt, VariableType::Sint64 | VariableType::Uint64 | VariableType::Float64)
-    }
-    #[cfg(not(feature = "support_64bits"))]
-    {
-        let _ = vt;
-        false
-    }
-}
 
 /// Returns the smallest `VariableTypeSize` variant whose byte count is ≥ `size_bytes`.
 const fn required_type_size_bytes(size_bytes: u8) -> crate::types::VariableTypeSize {

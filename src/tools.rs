@@ -64,6 +64,36 @@ pub fn make_type(tt: VariableTypeType, ts: VariableTypeSize) -> VariableType {
     unsafe { core::mem::transmute::<u8, VariableType>((tt as u8) | (ts as u8)) }
 }
 
+/// Returns `true` for variable types the library can read, write and compare.
+#[must_use]
+pub const fn is_supported_type(vt: VariableType) -> bool {
+    matches!(
+        vt,
+        VariableType::Boolean
+            | VariableType::Boolean8
+            | VariableType::Sint8
+            | VariableType::Sint16
+            | VariableType::Sint32
+            | VariableType::Uint8
+            | VariableType::Uint16
+            | VariableType::Uint32
+            | VariableType::Float32
+    ) || is_supported_64bits_type(vt)
+}
+
+#[inline]
+const fn is_supported_64bits_type(vt: VariableType) -> bool {
+    #[cfg(feature = "support_64bits")]
+    {
+        matches!(vt, VariableType::Sint64 | VariableType::Uint64 | VariableType::Float64)
+    }
+    #[cfg(not(feature = "support_64bits"))]
+    {
+        let _ = vt;
+        false
+    }
+}
+
 cfg_select! {
     feature = "support_64bits" => {
         #[must_use]

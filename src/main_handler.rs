@@ -10,6 +10,7 @@ use crate::protocol::definitions::{
 use crate::protocol::definitions::MemoryRegionType;
 use crate::protocol::CommHandler;
 use crate::timebase::Timebase;
+use crate::tools::is_supported_type;
 use crate::types::{RuntimePublishedValue, Timediff, Timestamp};
 #[cfg(feature = "datalogging")]
 use crate::types::AnyType;
@@ -187,14 +188,27 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
         };
 
-        let comm = CommHandler::new(rx_buf, tx_buf, seed);
-        let enabled = comm.is_enabled();
+        let timebase = Timebase::new();
+        let mut comm = CommHandler::new(rx_buf, tx_buf, seed);
+        let mut enabled = comm.is_enabled();
+
+        if let Some(rpv_array) = rpvs {
+            for rpv in rpv_array {
+                if !is_supported_type(rpv.var_type) {
+                    enabled = false;
+                }
+            }
+        }
+
+        if !enabled {
+            comm.disable(&timebase);
+        }
 
         Some(Self {
             comm,
             rx_buf,
             tx_buf,
-            timebase: Timebase::new(),
+            timebase,
             enabled,
             processing_request: false,
             disconnect_pending: false,

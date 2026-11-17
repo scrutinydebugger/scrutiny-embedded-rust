@@ -3,11 +3,15 @@ use crate::types::Timediff;
 #[cfg(feature = "datalogging")]
 use core::cell::UnsafeCell;
 #[cfg(feature = "datalogging")]
+use crate::config::{ReadMemoryCallback, RpvReadCallback};
+#[cfg(feature = "datalogging")]
 use crate::datalogging::{DataLoggerCell, DataloggerHost, State};
 #[cfg(feature = "datalogging")]
 use crate::ipc::{IpcMessage, Loop2MainMsg, Loop2MainMsgKind, Main2LoopMsg, StdAtomicFlag};
 #[cfg(feature = "datalogging")]
 use crate::timebase::Timebase;
+#[cfg(feature = "datalogging")]
+use crate::types::{AnyType, RuntimePublishedValue};
 #[cfg(feature = "datalogging")]
 use core::ptr;
 
@@ -24,15 +28,59 @@ pub enum LoopType {
 #[cfg(feature = "datalogging")]
 /// Per-loop datalogging runtime state, accessed only from the loop task.
 struct LoopDlRuntime {
-    owns: bool,
-    data_notified: bool,
+    owns:           bool,
+    data_notified:  bool,
     /// Address of the `DataLoggerCell` received via `TakeOwnership` IPC; null when not owned.
-    cell: *const DataLoggerCell,
+    cell:           *const DataLoggerCell,
+    rpvs:           Option<&'static [RuntimePublishedValue]>,
+    rpv_read_cb:    Option<RpvReadCallback>,
+    read_memory_cb: Option<ReadMemoryCallback>,
 }
 
 #[cfg(feature = "datalogging")]
 impl LoopDlRuntime {
-    const DEFAULT: Self = Self { owns: false, data_notified: false, cell: ptr::null() };
+    const DEFAULT: Self = Self {
+        owns:           false,
+        data_notified:  false,
+        cell:           ptr::null(),
+        rpvs:           None,
+        rpv_read_cb:    None,
+        read_memory_cb: None,
+    };
+}
+
+#[cfg(feature = "datalogging")]
+/// Private host implementation built from `LoopDlRuntime` fields.
+struct LoopHost {
+    rpvs:           Option<&'static [RuntimePublishedValue]>,
+    rpv_read_cb:    Option<RpvReadCallback>,
+    read_memory_cb: Option<ReadMemoryCallback>,
+}
+
+#[cfg(feature = "datalogging")]
+impl DataloggerHost for LoopHost {
+    unsafe fn read_memory(&self, dst: *mut u8, src: *const u8, count: usize) -> bool {
+        self.read_memory_cb.map_or_else(|| {
+            core::ptr::copy_nonoverlapping(src, dst, count);
+            true
+        }, |cb| cb(dst, src, count))
+    }
+
+    fn is_rpv_read_configured(&self) -> bool {
+        self.rpv_read_cb.is_some() && self.rpvs.is_some_and(|s| !s.is_empty())
+    }
+
+    fn rpv_exists(&self, id: u16) -> bool {
+        self.rpvs.is_some_and(|s| s.iter().any(|r| r.id == id))
+    }
+
+    fn get_rpv(&self, id: u16) -> Option<RuntimePublishedValue> {
+        self.rpvs.and_then(|s| s.iter().find(|r| r.id == id).copied())
+    }
+
+    fn read_rpv(&self, rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
+        self.rpv_read_cb.is_some_and(|cb| cb(rpv, out))
+    }
 }
 
 /// Describes a time domain in which scrutiny-related probing can occur.
@@ -76,7 +124,7 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0 }),
+            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None, read_memory_cb: None }),
             #[cfg(feature = "datalogging")]
             loop2main: IpcMessage::new_std(Loop2MainMsg::DEFAULT),
         }
@@ -96,7 +144,7 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0 }),
+            main2loop: IpcMessage::new_std(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None, read_memory_cb: None }),
             #[cfg(feature = "datalogging")]
             loop2main: IpcMessage::new_std(Loop2MainMsg::DEFAULT),
         }
@@ -149,10 +197,8 @@ impl LoopHandler {
 
     /// Must be called on every loop tick. Advances the timebase, handles IPC messages,
     /// and drives the datalogger state machine.
-    ///
-    /// `host` provides memory-read and RPV access.
     #[cfg(feature = "datalogging")]
-    pub fn process(&self, timestep: Timediff, host: &dyn DataloggerHost) {
+    pub fn process(&self, timestep: Timediff) {
         // SAFETY: only this loop task writes `timebase` and `dl_runtime`.
         let timebase = unsafe { &mut *self.timebase.get() };
         timebase.step(timestep);
@@ -165,10 +211,13 @@ impl LoopHandler {
         if self.main2loop.has_content() && !self.loop2main.has_content() {
             if let Some(msg) = self.main2loop.pop() {
                 match msg {
-                    Main2LoopMsg::TakeOwnership { cell_addr } => {
+                    Main2LoopMsg::TakeOwnership { cell_addr, rpvs, rpv_read_cb, read_memory_cb } => {
                         runtime.cell = cell_addr as *const DataLoggerCell;
                         runtime.owns = true;
                         runtime.data_notified = false;
+                        runtime.rpvs = rpvs;
+                        runtime.rpv_read_cb = rpv_read_cb;
+                        runtime.read_memory_cb = read_memory_cb;
                         self.loop2main.send(Loop2MainMsg {
                             kind: Loop2MainMsgKind::OwnershipTaken,
                             ..Loop2MainMsg::DEFAULT
@@ -190,6 +239,9 @@ impl LoopHandler {
                         if runtime.owns {
                             runtime.owns = false;
                             runtime.cell = ptr::null();
+                            runtime.rpvs = None;
+                            runtime.rpv_read_cb = None;
+                            runtime.read_memory_cb = None;
                             self.loop2main.send(Loop2MainMsg {
                                 kind: Loop2MainMsgKind::OwnershipReleased,
                                 ..Loop2MainMsg::DEFAULT
@@ -203,7 +255,12 @@ impl LoopHandler {
         if runtime.owns && !runtime.cell.is_null() {
             // SAFETY: we own the datalogger per IPC protocol.
             let dl = unsafe { (*runtime.cell).get() };
-            dl.process(timebase, host);
+            let host = LoopHost {
+                rpvs: runtime.rpvs,
+                rpv_read_cb: runtime.rpv_read_cb,
+                read_memory_cb: runtime.read_memory_cb,
+            };
+            dl.process(timebase, &host);
 
             if !self.loop2main.has_content() {
                 if dl.data_acquired() && !runtime.data_notified {

@@ -101,10 +101,15 @@ impl<T: Copy> IpcMessage<T, StdAtomicFlag> {
 
 #[cfg(feature = "datalogging")]
 /// Messages the main handler sends to a loop handler.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy)]
 pub enum Main2LoopMsg {
     /// `cell_addr` is the `*const DataLoggerCell` cast to `usize` to stay `Send`.
-    TakeOwnership { cell_addr: usize },
+    TakeOwnership {
+        cell_addr:      usize,
+        rpvs:           Option<&'static [crate::types::RuntimePublishedValue]>,
+        rpv_read_cb:    Option<crate::config::RpvReadCallback>,
+        read_memory_cb: Option<crate::config::ReadMemoryCallback>,
+    },
     ReleaseOwnership,
     ArmTrigger,
     DisarmTrigger,

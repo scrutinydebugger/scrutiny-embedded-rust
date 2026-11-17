@@ -1,5 +1,7 @@
 use crate::build_config;
 use crate::config::{Config, RpvReadCallback, RpvWriteCallback};
+#[cfg(feature = "datalogging")]
+use crate::config::ReadMemoryCallback;
 use crate::loop_handler::LoopHandler;
 use crate::protocol::codec_v1_0;
 use crate::protocol::definitions::{
@@ -130,6 +132,8 @@ pub struct MainHandler<'rxbuf, 'txbuf> {
     rpvs: Option<&'static [RuntimePublishedValue]>,
     rpv_read_callback: Option<RpvReadCallback>,
     rpv_write_callback: Option<RpvWriteCallback>,
+    #[cfg(feature = "datalogging")]
+    read_memory_callback: Option<ReadMemoryCallback>,
     loops: Option<&'static [LoopHandler]>,
     #[cfg(feature = "protected_regions")]
     forbidden_ranges: Option<&'static [AddressRange]>,
@@ -157,6 +161,8 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         let rpvs = config.get_rpvs_array();
         let rpv_read_callback = config.get_rpv_read_callback();
         let rpv_write_callback = config.get_rpv_write_callback();
+        #[cfg(feature = "datalogging")]
+        let read_memory_callback = config.get_read_memory_callback();
         let loops = config.get_loops();
         #[cfg(feature = "protected_regions")]
         let forbidden_ranges = config.forbidden_ranges();
@@ -195,6 +201,8 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             rpvs,
             rpv_read_callback,
             rpv_write_callback,
+            #[cfg(feature = "datalogging")]
+            read_memory_callback,
             loops,
             #[cfg(feature = "protected_regions")]
             forbidden_ranges,
@@ -406,7 +414,12 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 if !loop_handler.main2loop().has_content() {
                     if let Some(ref cell) = self.datalogger_cell {
                         let cell_addr = core::ptr::from_ref::<DataLoggerCell>(cell) as usize;
-                        loop_handler.main2loop().send(Main2LoopMsg::TakeOwnership { cell_addr });
+                        loop_handler.main2loop().send(Main2LoopMsg::TakeOwnership {
+                            cell_addr,
+                            rpvs:           self.rpvs,
+                            rpv_read_cb:    self.rpv_read_callback,
+                            read_memory_cb: self.read_memory_callback,
+                        });
                         self.dl.pending_new_owner = None;
                     }
                 }

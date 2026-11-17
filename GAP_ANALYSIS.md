@@ -92,7 +92,7 @@ For every command the Rust port implements, the byte layout matches the C++ code
 |---|---|---|
 | T-01 | `TestUserCommand` | `TestCommandCalled`, `TestResponseOverflow`, `TestNoCallback` (depends on F-01) |
 | T-02 | `TestMemoryControlRPV` | `TestReadMultipleRPVEachType`, `TestReadRPVResponseOverflow`, `TestWriteAllTypes`, `TestWriteRPVResponseOverflow`, `TestWriteRPVResponseFullNoOverflow` |
-| T-03 | `TestCommHandler` | `TestHeartbeatTimeoutExpire`, `TestConnectDisconnectBehaviour` |
+| T-03 | `TestCommHandler` | ~~`TestHeartbeatTimeoutExpire`, `TestConnectDisconnectBehaviour`~~ **Correction:** both were already ported in `tests/comm_handler.rs` (`test_heartbeat_timeout_expire`, `test_connect_disconnect`); missed by the analysis. Extra checks added in commit `226910c`. |
 | T-04 | `TestTxParsing` | `TestReadAllData`, `TestReadBytePerByte`, `TestReadMoreThanAvailable`, `TestSendsOverflow`, `TestSendsFullBuffer`, `TestSendsOverflowRestart` |
 | T-05 | `TestRxParsing` | `TestRx_ZeroLen_AllInOne`, `TestRx_ZeroLen_BytePerByte`, `TestRx_NonZeroLen_SplitInLen`, `TestRx_Discover_2_parts`, `TestRx_UseAllBuffer`, `TestRx_OverflowRestoreAfterDelay` |
 | T-06 | Misc | `TestIPC.CheckWithThread`, `TestVariableFetching.RandomFetch`, `TestDataLoggingTypes.AnyTypeCompareCast` |

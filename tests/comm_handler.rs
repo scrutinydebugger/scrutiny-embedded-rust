@@ -220,6 +220,7 @@ fn test_rx_framing_valid() {
     assert_eq!(cmd, 0x01);
     assert_eq!(subfn, 0x02);
     assert_eq!(&rx[..data_len as usize], &payload);
+    assert_eq!(comm.get_rx_error(), RxError::None);
 }
 
 #[test]
@@ -239,16 +240,22 @@ fn test_rx_bad_crc_no_request() {
 #[test]
 fn test_rx_invalid_command_bit() {
     let (mut rx, mut tx) = make_comm_buffers();
-    let tb = Timebase::new();
+    let mut tb = Timebase::new();
     let mut comm = CommHandler::new(&mut rx, &mut tx, 0);
     comm.connect(&tb);
 
     // Bit 7 set means it's a response frame, not a valid request
     let frame = [0x81u8, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    assert_eq!(comm.get_rx_error(), RxError::None);
     comm.receive_data(&frame, &mut rx, &tb);
 
     assert!(!comm.request_received());
     assert_eq!(comm.get_rx_error(), RxError::InvalidCommand);
+
+    // The error clears when a new frame starts after the RX timeout
+    tb.step(RX_TIMEOUT_100NS);
+    comm.receive_data(&[0x01], &mut rx, &tb);
+    assert_eq!(comm.get_rx_error(), RxError::None);
 }
 
 #[test]
@@ -302,8 +309,11 @@ fn test_rx_chunked_delivery() {
     }
 
     assert!(comm.request_received());
-    let (_, _, data_len) = comm.get_request().unwrap();
+    let (cmd, subfn, data_len) = comm.get_request().unwrap();
+    assert_eq!(cmd, 0x01);
+    assert_eq!(subfn, 0x01);
     assert_eq!(&rx[..data_len as usize], &payload);
+    assert_eq!(comm.get_rx_error(), RxError::None);
 }
 
 #[test]

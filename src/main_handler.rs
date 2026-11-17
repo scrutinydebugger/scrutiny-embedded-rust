@@ -44,7 +44,7 @@ pub enum DataloggingError {
 struct DataloggingState {
     /// Index into the loops slice of the loop that currently owns the datalogger.
     owner: Option<u8>,
-    /// Loop index that should take ownership next (triggers a TakeOwnership IPC message).
+    /// Loop index that should take ownership next (triggers a `TakeOwnership` IPC message).
     pending_new_owner: Option<u8>,
     request_release: bool,
     pending_release: bool,
@@ -53,7 +53,7 @@ struct DataloggingState {
     reading_in_progress: bool,
     read_rolling_counter: u8,
     read_crc: u32,
-    /// Cached state updated via IPC StatusUpdate / DataAcquired messages.
+    /// Cached state updated via IPC `StatusUpdate` / `DataAcquired` messages.
     cached_state: DlState,
     cached_bytes_to_complete: usize,
     cached_write_counter: usize,
@@ -108,11 +108,7 @@ impl DataloggerHost for RpvHost {
     }
 
     fn read_rpv(&self, rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
-        if let Some(cb) = self.rpv_read_callback {
-            cb(rpv, out)
-        } else {
-            false
-        }
+        self.rpv_read_callback.is_some_and(|cb| cb(rpv, out))
     }
 }
 
@@ -334,14 +330,13 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
 
     fn process_loops(&mut self) {
         let Some(loops) = self.loops else { return };
-        for i in 0..loops.len() {
+        for (i, loop_handler) in loops.iter().enumerate() {
             #[cfg(feature = "datalogging")]
-            if let Some(msg) = loops[i].loop2main().pop() {
-                self.handle_loop2main_msg(i as u8, msg);
+            if let Some(msg) = loop_handler.loop2main().pop() {
+                self.handle_loop2main_msg(u8::try_from(i).unwrap_or(u8::MAX), msg);
             }
-            // Non-datalogging builds have nothing to do here yet.
             #[cfg(not(feature = "datalogging"))]
-            let _ = i;
+            let _ = loop_handler;
         }
     }
 
@@ -427,7 +422,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         let data = &self.rx_buf[..data_len];
         #[cfg(feature = "datalogging")]
         let dl_enabled = self.datalogger_cell.is_some()
-            && self.loops.is_some_and(|l| l.iter().any(|h| h.datalogging_allowed()));
+            && self.loops.is_some_and(|l| l.iter().any(LoopHandler::datalogging_allowed));
         #[cfg(not(feature = "datalogging"))]
         let dl_enabled = false;
         match CommandId::try_from(cmd_id) {
@@ -982,9 +977,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                     let mut region_err = false;
                     'outer: for i in 0..config.trigger.operand_count as usize {
                         let touches = match config.trigger.operands[i] {
-                            Operand::Var { addr, datatype } =>
-                                codec_v1_0::region_overlaps(addr as usize, datatype.type_size() as usize, forbidden),
-                            Operand::VarBit { addr, datatype, .. } =>
+                            Operand::Var { addr, datatype } | Operand::VarBit { addr, datatype, .. } =>
                                 codec_v1_0::region_overlaps(addr as usize, datatype.type_size() as usize, forbidden),
                             _ => false,
                         };

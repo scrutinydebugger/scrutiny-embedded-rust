@@ -15,7 +15,7 @@ use crate::types::{
 
 // ── Host interface ────────────────────────────────────────────────────────────
 
-/// Interface that the DataLogger needs from the host application.
+/// Interface that the `DataLogger` needs from the host application.
 ///
 /// Wire this up to `MainHandler` once the rest of the library is in place.
 /// For tests, implement it directly with simple in-process stubs.
@@ -194,6 +194,7 @@ impl<'buf> DataLogger<'buf> {
                         bitsize,
                         ..
                     } => {
+                        #[allow(clippy::cast_possible_truncation)]
                         let max_bits =
                             (core::mem::size_of::<UintBiggest>() * 8) as u8;
                         if bitoffset >= max_bits || bitsize > max_bits || bitsize == 0 {
@@ -248,7 +249,7 @@ impl<'buf> DataLogger<'buf> {
     }
 
     /// Arms the trigger so the datalogger actively watches for the trigger condition.
-    pub fn arm_trigger(&mut self) {
+    pub const fn arm_trigger(&mut self) {
         if matches!(
             self.state,
             State::Configured | State::AcquisitionCompleted | State::Triggered
@@ -258,7 +259,7 @@ impl<'buf> DataLogger<'buf> {
     }
 
     /// Disarms the trigger; the datalogger keeps logging pre-trigger data.
-    pub fn disarm_trigger(&mut self) {
+    pub const fn disarm_trigger(&mut self) {
         if matches!(
             self.state,
             State::Armed | State::AcquisitionCompleted | State::Triggered
@@ -357,53 +358,63 @@ impl<'buf> DataLogger<'buf> {
     // ── Accessors ─────────────────────────────────────────────────────────────
 
     /// Total byte capacity of the acquisition buffer.
+    #[must_use]
     #[inline]
-    pub fn buffer_size(&self) -> usize {
+    pub const fn buffer_size(&self) -> usize {
         self.buffer_size
     }
 
+    #[must_use]
     #[inline]
     pub fn data_acquired(&self) -> bool {
         self.state == State::AcquisitionCompleted
     }
 
+    #[must_use]
     #[inline]
-    pub fn get_state(&self) -> State {
+    pub const fn get_state(&self) -> State {
         self.state
     }
 
+    #[must_use]
     #[inline]
     pub fn armed(&self) -> bool {
         self.state == State::Armed
     }
 
+    #[must_use]
     #[inline]
     pub fn in_error(&self) -> bool {
         self.state == State::Error
     }
 
+    #[must_use]
     #[inline]
-    pub fn config_valid(&self) -> bool {
+    pub const fn config_valid(&self) -> bool {
         self.config_valid
     }
 
+    #[must_use]
     #[inline]
-    pub fn get_acquisition_id(&self) -> u16 {
+    pub const fn get_acquisition_id(&self) -> u16 {
         self.acquisition_id
     }
 
+    #[must_use]
     #[inline]
-    pub fn get_config_id(&self) -> u16 {
+    pub const fn get_config_id(&self) -> u16 {
         self.config_id
     }
 
     /// Number of entries logged after the trigger point (available after `AcquisitionCompleted`).
+    #[must_use]
     #[inline]
-    pub fn log_points_after_trigger(&self) -> usize {
+    pub const fn log_points_after_trigger(&self) -> usize {
         self.log_points_after_trigger
     }
 
     /// Bytes yet to be written after trigger before the acquisition completes.
+    #[must_use]
     #[inline]
     pub fn get_bytes_to_acquire_from_trigger_to_completion(&self) -> usize {
         if self.state == State::Triggered {
@@ -414,6 +425,7 @@ impl<'buf> DataLogger<'buf> {
     }
 
     /// Bytes written since the trigger event.
+    #[must_use]
     #[inline]
     pub fn data_counter_since_trigger(&self) -> usize {
         if self.state == State::Triggered {
@@ -425,25 +437,27 @@ impl<'buf> DataLogger<'buf> {
 
     /// Mutable access to the acquisition configuration.
     #[inline]
-    pub fn config_mut(&mut self) -> &mut Configuration {
+    pub const fn config_mut(&mut self) -> &mut Configuration {
         &mut self.config
     }
 
     /// Immutable access to the acquisition configuration.
+    #[must_use]
     #[inline]
-    pub fn config_ref(&self) -> &Configuration {
+    pub const fn config_ref(&self) -> &Configuration {
         &self.config
     }
 
     /// Mutable access to the encoder (which also embeds the reader state).
     #[inline]
-    pub fn get_encoder_mut(&mut self) -> &mut RawFormatEncoder<'buf> {
+    pub const fn get_encoder_mut(&mut self) -> &mut RawFormatEncoder<'buf> {
         &mut self.encoder
     }
 
     /// Immutable access to the encoder.
+    #[must_use]
     #[inline]
-    pub fn get_encoder(&self) -> &RawFormatEncoder<'buf> {
+    pub const fn get_encoder(&self) -> &RawFormatEncoder<'buf> {
         &self.encoder
     }
 
@@ -469,10 +483,10 @@ impl<'buf> DataLogger<'buf> {
         let multiplier = u64::from(255u8 - self.config.probe_location);
         let remaining = ((self.buffer_size as u64 * multiplier) >> 8) as usize;
 
-        self.remaining_data_to_write = if !self.encoder.buffer_full() {
-            remaining.max(self.encoder.remaining_bytes_to_full())
-        } else {
+        self.remaining_data_to_write = if self.encoder.buffer_full() {
             remaining
+        } else {
+            remaining.max(self.encoder.remaining_bytes_to_full())
         };
 
         if self.remaining_data_to_write > self.buffer_size {
@@ -567,7 +581,7 @@ pub(crate) fn fetch_variable(
         return false;
     }
     // Safety: caller ensures addr is valid; we only write `size` bytes into `out`.
-    unsafe { host.read_memory(out as *mut AnyType as *mut u8, addr, size) }
+    unsafe { host.read_memory(core::ptr::from_mut::<AnyType>(out).cast::<u8>(), addr, size) }
 }
 
 /// Reads a bit-field from memory and stores the result in `out`.
@@ -646,17 +660,17 @@ pub(crate) fn fetch_variable_bitfield(
             out.valtype = output_type;
         }
         VariableType::Sint8 => {
-            let v = sign_extend(u32::from(masked as u8), bitsize as u32) as i8;
+            let v = sign_extend(u32::from(masked as u8), u32::from(bitsize)) as i8;
             out.val = AnyType { sint8: v };
             out.valtype = output_type;
         }
         VariableType::Sint16 => {
-            let v = sign_extend(u32::from(masked as u16), bitsize as u32) as i16;
+            let v = sign_extend(u32::from(masked as u16), u32::from(bitsize)) as i16;
             out.val = AnyType { sint16: v };
             out.valtype = output_type;
         }
         VariableType::Sint32 => {
-            let v = sign_extend(masked as u32, bitsize as u32);
+            let v = sign_extend(masked as u32, u32::from(bitsize));
             out.val = AnyType { sint32: v };
             out.valtype = output_type;
         }
@@ -667,7 +681,7 @@ pub(crate) fn fetch_variable_bitfield(
         }
         #[cfg(feature = "support_64bits")]
         VariableType::Sint64 => {
-            let v = sign_extend_64(masked, bitsize as u32);
+            let v = sign_extend_64(masked, u32::from(bitsize));
             out.val = AnyType { sint64: v };
             out.valtype = output_type;
         }
@@ -685,12 +699,13 @@ pub fn convert_to_compare_type(pair: &mut AnyValAndTypePair) {
         match pair.valtype {
             #[cfg(feature = "support_64bits")]
             VariableType::Float64 => {
+                #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
                 let f32val = pair.val.float64 as f32;
                 pair.val.float32 = f32val;
                 pair.valtype = VariableType::Float32;
             }
             VariableType::Boolean | VariableType::Boolean8 => {
-                let b = pair.val.boolean as UintBiggest;
+                let b = UintBiggest::from(pair.val.boolean);
                 crate::tools::set_biggest_uint(&mut pair.val, b);
                 pair.valtype = BIGGEST_UINT;
             }
@@ -742,7 +757,7 @@ pub fn convert_to_compare_type(pair: &mut AnyValAndTypePair) {
 // ── Private free helpers ──────────────────────────────────────────────────────
 
 /// Returns `true` for types the datalogger can safely read and compare.
-pub(crate) fn is_supported_type(vt: VariableType) -> bool {
+pub(crate) const fn is_supported_type(vt: VariableType) -> bool {
     matches!(
         vt,
         VariableType::Boolean
@@ -760,7 +775,7 @@ pub(crate) fn is_supported_type(vt: VariableType) -> bool {
 }
 
 #[inline]
-fn cfg_if_64bits_supported(vt: VariableType) -> bool {
+const fn cfg_if_64bits_supported(vt: VariableType) -> bool {
     #[cfg(feature = "support_64bits")]
     {
         matches!(vt, VariableType::Sint64 | VariableType::Uint64 | VariableType::Float64)
@@ -773,7 +788,7 @@ fn cfg_if_64bits_supported(vt: VariableType) -> bool {
 }
 
 /// Returns the smallest `VariableTypeSize` variant whose byte count is ≥ `size_bytes`.
-fn required_type_size_bytes(size_bytes: u8) -> crate::types::VariableTypeSize {
+const fn required_type_size_bytes(size_bytes: u8) -> crate::types::VariableTypeSize {
     use crate::types::VariableTypeSize;
     match size_bytes {
         0 => VariableTypeSize::VTSundef,
@@ -788,7 +803,7 @@ fn required_type_size_bytes(size_bytes: u8) -> crate::types::VariableTypeSize {
 
 /// Sign-extends a `bitsize`-bit two's-complement integer stored in a `u32`.
 #[allow(clippy::cast_possible_wrap)]
-fn sign_extend(val: u32, bitsize: u32) -> i32 {
+const fn sign_extend(val: u32, bitsize: u32) -> i32 {
     if bitsize == 0 || bitsize >= 32 {
         return val as i32;
     }
@@ -798,7 +813,7 @@ fn sign_extend(val: u32, bitsize: u32) -> i32 {
 
 #[cfg(feature = "support_64bits")]
 #[allow(clippy::cast_possible_wrap)]
-fn sign_extend_64(val: u64, bitsize: u32) -> i64 {
+const fn sign_extend_64(val: u64, bitsize: u32) -> i64 {
     if bitsize == 0 || bitsize >= 64 {
         return val as i64;
     }

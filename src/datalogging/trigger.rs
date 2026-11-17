@@ -4,7 +4,7 @@ use crate::types::{AnyType, VariableType, BIGGEST_SINT, BIGGEST_UINT};
 /// Persistent state carried across trigger evaluations for stateful conditions.
 #[derive(Clone, Copy)]
 pub struct ConditionSharedData {
-    /// Previous value for the ChangeMoreThan condition.
+    /// Previous value for the `ChangeMoreThan` condition.
     pub cmt_previous_val: AnyType,
     pub cmt_previous_valtype: VariableType,
     pub cmt_initialized: bool,
@@ -65,25 +65,25 @@ fn relational_compare(
     op1: &AnyValAndTypePair,
     cmp: fn(f32, f32) -> bool,
     cmp_uint: fn(crate::types::UintBiggest, crate::types::UintBiggest) -> bool,
-    cmp_sint: fn(crate::types::IntBiggest, crate::types::IntBiggest) -> bool,
+    cmp_signed: fn(crate::types::IntBiggest, crate::types::IntBiggest) -> bool,
 ) -> bool {
-    use CompareCategory::*;
+    use CompareCategory::{Float, Sint, Uint};
     // Safety: after convert_to_compare_type the right union field is valid for the given valtype.
     match (compare_category(op0.valtype), compare_category(op1.valtype)) {
         (Float, Float) => cmp(unsafe { op0.val.float32 }, unsafe { op1.val.float32 }),
         (Float, Sint) => cmp(unsafe { op0.val.float32 }, unsafe { read_sint_as_float(op1) }),
         (Float, Uint) => cmp(unsafe { op0.val.float32 }, unsafe { read_uint_as_float(op1) }),
         (Sint, Float) => cmp(unsafe { read_sint_as_float(op0) }, unsafe { op1.val.float32 }),
-        (Sint, Sint) => cmp_sint(unsafe { read_sint(op0) }, unsafe { read_sint(op1) }),
+        (Sint, Sint) => cmp_signed(unsafe { read_sint(op0) }, unsafe { read_sint(op1) }),
         (Sint, Uint) => {
             // Clamp uint to INT_MAX to avoid sign issues
             let uint_clamped = clamp_uint_to_int_max(unsafe { read_uint(op1) });
-            cmp_sint(unsafe { read_sint(op0) }, uint_clamped)
+            cmp_signed(unsafe { read_sint(op0) }, uint_clamped)
         }
         (Uint, Float) => cmp(unsafe { read_uint_as_float(op0) }, unsafe { op1.val.float32 }),
         (Uint, Sint) => {
             let uint_clamped = clamp_uint_to_int_max(unsafe { read_uint(op0) });
-            cmp_sint(uint_clamped, unsafe { read_sint(op1) })
+            cmp_signed(uint_clamped, unsafe { read_sint(op1) })
         }
         (Uint, Uint) => cmp_uint(unsafe { read_uint(op0) }, unsafe { read_uint(op1) }),
         _ => false,
@@ -91,45 +91,48 @@ fn relational_compare(
 }
 
 #[inline]
-fn clamp_uint_to_int_max(v: crate::types::UintBiggest) -> crate::types::IntBiggest {
+const fn clamp_uint_to_int_max(v: crate::types::UintBiggest) -> crate::types::IntBiggest {
     let max = crate::types::IntBiggest::MAX as crate::types::UintBiggest;
-    if v > max { crate::types::IntBiggest::MAX } else { v as crate::types::IntBiggest }
+    if v > max { crate::types::IntBiggest::MAX } else { v.cast_signed() }
 }
 
 /// # Safety
 /// Caller must have called `convert_to_compare_type` and confirmed `valtype == BIGGEST_SINT`.
 #[inline]
-unsafe fn read_sint(p: &AnyValAndTypePair) -> crate::types::IntBiggest {
+const unsafe fn read_sint(p: &AnyValAndTypePair) -> crate::types::IntBiggest {
     crate::tools::read_biggest_sint(&p.val)
 }
 
 /// # Safety
 /// Caller must have called `convert_to_compare_type` and confirmed `valtype == BIGGEST_UINT`.
 #[inline]
-unsafe fn read_uint(p: &AnyValAndTypePair) -> crate::types::UintBiggest {
+const unsafe fn read_uint(p: &AnyValAndTypePair) -> crate::types::UintBiggest {
     crate::tools::read_biggest_uint(&p.val)
 }
 
 /// # Safety
 /// Caller must have called `convert_to_compare_type` and confirmed `valtype == BIGGEST_SINT`.
+#[allow(clippy::cast_precision_loss)]
 #[inline]
-unsafe fn read_sint_as_float(p: &AnyValAndTypePair) -> f32 {
+const unsafe fn read_sint_as_float(p: &AnyValAndTypePair) -> f32 {
     crate::tools::read_biggest_sint(&p.val) as f32
 }
 
 /// # Safety
 /// Caller must have called `convert_to_compare_type` and confirmed `valtype == BIGGEST_UINT`.
+#[allow(clippy::cast_precision_loss)]
 #[inline]
-unsafe fn read_uint_as_float(p: &AnyValAndTypePair) -> f32 {
+const unsafe fn read_uint_as_float(p: &AnyValAndTypePair) -> f32 {
     crate::tools::read_biggest_uint(&p.val) as f32
 }
 
 // ── Condition evaluators ──────────────────────────────────────────────────────
 
-pub fn always_true_eval(_data: &mut ConditionSharedData, _ops: &[AnyValAndTypePair]) -> bool {
+pub const fn always_true_eval(_data: &mut ConditionSharedData, _ops: &[AnyValAndTypePair]) -> bool {
     true
 }
 
+#[allow(clippy::float_cmp)]
 pub fn equal_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]) -> bool {
     if ops.len() < 2 {
         return false;
@@ -137,6 +140,7 @@ pub fn equal_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]) ->
     relational_compare(&ops[0], &ops[1], |a, b| a == b, |a, b| a == b, |a, b| a == b)
 }
 
+#[allow(clippy::float_cmp)]
 pub fn not_equal_eval(_data: &mut ConditionSharedData, ops: &[AnyValAndTypePair]) -> bool {
     if ops.len() < 2 {
         return false;
@@ -178,7 +182,7 @@ pub fn less_or_equal_than_eval(
     relational_compare(&ops[0], &ops[1], |a, b| a <= b, |a, b| a <= b, |a, b| a <= b)
 }
 
-pub fn change_more_than_reset(data: &mut ConditionSharedData) {
+pub const fn change_more_than_reset(data: &mut ConditionSharedData) {
     data.cmt_initialized = false;
 }
 
@@ -195,20 +199,20 @@ pub fn change_more_than_eval(data: &mut ConditionSharedData, ops: &[AnyValAndTyp
         CompareCategory::Unknown => return false,
     };
 
-    let mut outval = false;
-
-    if data.cmt_initialized {
-        outval = match compare_category(ops[0].valtype) {
+    let outval = if data.cmt_initialized {
+        match compare_category(ops[0].valtype) {
             CompareCategory::Uint => {
                 let cur = unsafe { read_uint(&ops[0]) };
                 let prev = crate::tools::read_biggest_uint(&data.cmt_previous_val);
-                // Cast: f32 → i64 (signed delta) → u64 so wrapping_add correctly subtracts when delta < 0.
-                let threshold = prev.wrapping_add(delta as crate::types::IntBiggest as crate::types::UintBiggest);
+                // Cast: f32 → signed delta → unsigned so wrapping_add subtracts when delta < 0.
+                #[allow(clippy::cast_possible_truncation)]
+                let threshold = prev.wrapping_add((delta as crate::types::IntBiggest).cast_unsigned());
                 if delta >= 0.0 { cur > threshold } else { cur < threshold }
             }
             CompareCategory::Sint => {
                 let cur = unsafe { read_sint(&ops[0]) };
                 let prev = crate::tools::read_biggest_sint(&data.cmt_previous_val);
+                #[allow(clippy::cast_possible_truncation)]
                 let threshold = prev.wrapping_add(delta as crate::types::IntBiggest);
                 if delta >= 0.0 { cur > threshold } else { cur < threshold }
             }
@@ -218,10 +222,11 @@ pub fn change_more_than_eval(data: &mut ConditionSharedData, ops: &[AnyValAndTyp
                 if delta >= 0.0 { cur > prev + delta } else { cur < prev + delta }
             }
             CompareCategory::Unknown => false,
-        };
+        }
     } else {
         data.cmt_initialized = true;
-    }
+        false
+    };
 
     // Store current value as previous for next evaluation.
     data.cmt_previous_val = ops[0].val;

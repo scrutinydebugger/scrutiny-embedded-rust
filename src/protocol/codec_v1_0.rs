@@ -883,6 +883,7 @@ pub fn encode_response_datalogging_get_setup(
     tx_buf[0..4].copy_from_slice(&buffer_size.to_be_bytes());
     tx_buf[4] = encoding as u8;
     tx_buf[5] = max_signal_count;
+    #[allow(clippy::cast_possible_truncation)]
     Ok(DATALEN as u16)
 }
 
@@ -904,6 +905,7 @@ pub fn encode_response_datalogging_get_status(
     tx_buf[0] = state;
     tx_buf[1..5].copy_from_slice(&bytes_to_complete.to_be_bytes());
     tx_buf[5..9].copy_from_slice(&write_counter.to_be_bytes());
+    #[allow(clippy::cast_possible_truncation)]
     Ok(DATALEN as u16)
 }
 
@@ -931,6 +933,7 @@ pub fn encode_response_datalogging_get_acquisition_metadata(
     tx_buf[4..8].copy_from_slice(&entry_count.to_be_bytes());
     tx_buf[8..12].copy_from_slice(&data_size.to_be_bytes());
     tx_buf[12..16].copy_from_slice(&points_after_trigger.to_be_bytes());
+    #[allow(clippy::cast_possible_truncation)]
     Ok(DATALEN as u16)
 }
 
@@ -959,11 +962,12 @@ pub fn encode_response_datalogging_read_acquisition(
     let nread = encoder.reader_read_chunk(&mut tx_buf[HEADER..HEADER + available]);
     *crc = crc32(&tx_buf[HEADER..HEADER + nread], *crc);
 
-    let mut finished = false;
-    if encoder.reader_finished() && nread + HEADER + CRC_SIZE <= tx_buf.len() {
+    let finished = if encoder.reader_finished() && nread + HEADER + CRC_SIZE <= tx_buf.len() {
         tx_buf[HEADER + nread..HEADER + nread + CRC_SIZE].copy_from_slice(&crc.to_be_bytes());
-        finished = true;
-    }
+        true
+    } else {
+        false
+    };
 
     tx_buf[0] = u8::from(finished);
     tx_buf[1] = rolling_counter;
@@ -1028,9 +1032,8 @@ pub(crate) fn decode_datalogging_configure_request(
                 if data.len() < cursor + 1 + ADDR_SIZE {
                     return Err(ResponseCode::InvalidRequest);
                 }
-                let datatype = match crate::types::VariableType::try_from(data[cursor]) {
-                    Ok(t) => t,
-                    Err(()) => return Err(ResponseCode::InvalidRequest),
+                let Ok(datatype) = crate::types::VariableType::try_from(data[cursor]) else {
+                    return Err(ResponseCode::InvalidRequest);
                 };
                 cursor += 1;
                 let addr = read_be_addr(&data[cursor..]) as *const u8;
@@ -1042,9 +1045,8 @@ pub(crate) fn decode_datalogging_configure_request(
                 if data.len() < cursor + 3 + ADDR_SIZE {
                     return Err(ResponseCode::InvalidRequest);
                 }
-                let datatype = match crate::types::VariableType::try_from(data[cursor]) {
-                    Ok(t) => t,
-                    Err(()) => return Err(ResponseCode::InvalidRequest),
+                let Ok(datatype) = crate::types::VariableType::try_from(data[cursor]) else {
+                    return Err(ResponseCode::InvalidRequest);
                 };
                 cursor += 1;
                 let addr = read_be_addr(&data[cursor..]) as *const u8;

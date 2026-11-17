@@ -108,6 +108,37 @@ unsafe impl Send for AddressRange {}
 #[cfg(feature = "protected_regions")]
 unsafe impl Sync for AddressRange {}
 
+impl TryFrom<u8> for VariableType {
+    type Error = ();
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            x if x == Self::Sint8 as u8 => Ok(Self::Sint8),
+            x if x == Self::Uint8 as u8 => Ok(Self::Uint8),
+            x if x == Self::Float8 as u8 => Ok(Self::Float8),
+            x if x == Self::Cfloat8 as u8 => Ok(Self::Cfloat8),
+            x if x == Self::Boolean8 as u8 => Ok(Self::Boolean8),
+            x if x == Self::Sint16 as u8 => Ok(Self::Sint16),
+            x if x == Self::Uint16 as u8 => Ok(Self::Uint16),
+            x if x == Self::Float16 as u8 => Ok(Self::Float16),
+            x if x == Self::Cfloat16 as u8 => Ok(Self::Cfloat16),
+            x if x == Self::Sint32 as u8 => Ok(Self::Sint32),
+            x if x == Self::Uint32 as u8 => Ok(Self::Uint32),
+            x if x == Self::Float32 as u8 => Ok(Self::Float32),
+            x if x == Self::Cfloat32 as u8 => Ok(Self::Cfloat32),
+            x if x == Self::Boolean as u8 => Ok(Self::Boolean),
+            #[cfg(feature = "support_64bits")]
+            x if x == Self::Sint64 as u8 => Ok(Self::Sint64),
+            #[cfg(feature = "support_64bits")]
+            x if x == Self::Uint64 as u8 => Ok(Self::Uint64),
+            #[cfg(feature = "support_64bits")]
+            x if x == Self::Float64 as u8 => Ok(Self::Float64),
+            #[cfg(feature = "support_64bits")]
+            x if x == Self::Cfloat64 as u8 => Ok(Self::Cfloat64),
+            _ => Err(()),
+        }
+    }
+}
+
 /// A point-in-time snapshot used as a reference for elapsed-time calculations. Units: 100 ns ticks.
 pub type Timestamp = u32;
 

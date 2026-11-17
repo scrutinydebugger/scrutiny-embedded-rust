@@ -227,6 +227,23 @@ pub enum DataLogControlSubfn {
     ResetDatalogger = 8,
 }
 
+impl TryFrom<u8> for DataLogControlSubfn {
+    type Error = ();
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            x if x == Self::GetSetup as u8 => Ok(Self::GetSetup),
+            x if x == Self::ConfigureDatalog as u8 => Ok(Self::ConfigureDatalog),
+            x if x == Self::ArmTrigger as u8 => Ok(Self::ArmTrigger),
+            x if x == Self::DisarmTrigger as u8 => Ok(Self::DisarmTrigger),
+            x if x == Self::GetStatus as u8 => Ok(Self::GetStatus),
+            x if x == Self::GetAcquisitionMetadata as u8 => Ok(Self::GetAcquisitionMetadata),
+            x if x == Self::ReadAcquisition as u8 => Ok(Self::ReadAcquisition),
+            x if x == Self::ResetDatalogger as u8 => Ok(Self::ResetDatalogger),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommState {
     Idle,

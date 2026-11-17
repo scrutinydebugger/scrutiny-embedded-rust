@@ -4,6 +4,9 @@ use crate::types::{AnyType, RuntimePublishedValue};
 #[cfg(feature = "protected_regions")]
 use crate::types::AddressRange;
 
+#[cfg(feature = "datalogging")]
+use crate::datalogging::DataLoggerCell;
+
 /// Callback to read a Runtime Published Value.
 pub type RpvReadCallback = fn(RuntimePublishedValue, &mut AnyType) -> bool;
 
@@ -37,6 +40,9 @@ pub struct Config<'rxbuf, 'txbuf> {
 
     loops: Option<&'static [LoopHandler]>,
 
+    #[cfg(feature = "datalogging")]
+    datalogger_cell: Option<&'static DataLoggerCell<'static>>,
+
     user_command_callback: Option<UserCommandCallback>,
 
     /// Maximum bitrate in bits/sec, enforced by the server.
@@ -64,6 +70,8 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
             rpv_read_callback: None,
             rpv_write_callback: None,
             loops: None,
+            #[cfg(feature = "datalogging")]
+            datalogger_cell: None,
             user_command_callback: None,
             max_bitrate: 0,
             session_counter_seed: 0,
@@ -85,6 +93,8 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
         self.rpv_read_callback = None;
         self.rpv_write_callback = None;
         self.loops = None;
+        #[cfg(feature = "datalogging")]
+        { self.datalogger_cell = None; }
         self.user_command_callback = None;
         self.max_bitrate = 0;
         self.session_counter_seed = 0;
@@ -206,6 +216,33 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
     #[must_use]
     pub fn get_loop_count(&self) -> u8 {
         self.loops.map_or(0, |s| u8::try_from(s.len()).unwrap_or(u8::MAX))
+    }
+
+    /// Registers the `DataLoggerCell` for use by the datalogging subsystem.
+    #[cfg(feature = "datalogging")]
+    pub const fn set_datalogger(&mut self, cell: &'static DataLoggerCell<'static>) {
+        self.datalogger_cell = Some(cell);
+    }
+
+    /// Returns `true` if a `DataLoggerCell` has been registered.
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub const fn is_datalogging_configured(&self) -> bool {
+        self.datalogger_cell.is_some()
+    }
+
+    /// Returns `true` if at least one loop has datalogging enabled.
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub fn has_at_least_one_loop_with_datalogging(&self) -> bool {
+        self.loops.is_some_and(|loops| loops.iter().any(LoopHandler::datalogging_allowed))
+    }
+
+    /// Returns the registered `DataLoggerCell`, or `None`.
+    #[cfg(feature = "datalogging")]
+    #[must_use]
+    pub(crate) const fn get_datalogger_cell(&self) -> Option<&'static DataLoggerCell<'static>> {
+        self.datalogger_cell
     }
 
     /// Returns the RPV read callback, or `None` if unset.

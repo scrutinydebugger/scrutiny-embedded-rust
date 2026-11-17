@@ -60,7 +60,7 @@ fn find_rpv(id: u16, rpvs: &'static [RuntimePublishedValue]) -> Option<RuntimePu
 
 /// Returns `true` if the byte range `[addr, addr + len)` overlaps any entry in `ranges`.
 #[cfg(feature = "protected_regions")]
-fn region_overlaps(addr: usize, len: usize, ranges: &[AddressRange]) -> bool {
+pub(crate) fn region_overlaps(addr: usize, len: usize, ranges: &[AddressRange]) -> bool {
     if len == 0 {
         return false;
     }
@@ -351,7 +351,11 @@ pub fn encode_response_get_info_loop_definition(
     }
     tx_buf[0] = loop_id;
     tx_buf[1] = handler.loop_type() as u8;
-    tx_buf[2] = 0; // attributes: bit 7 = datalogging supported (always 0 until datalogging is implemented)
+    #[cfg(feature = "datalogging")]
+    let attr = if handler.datalogging_allowed() { 0x80u8 } else { 0 };
+    #[cfg(not(feature = "datalogging"))]
+    let attr = 0u8;
+    tx_buf[2] = attr;
 
     let mut cursor = 3usize;
     match handler.loop_type() {
@@ -849,4 +853,267 @@ pub fn encode_response_memory_control_write_rpv(
     }
 
     Ok(u16::try_from(tx_cursor).unwrap_or(u16::MAX))
+}
+
+// ===== DataLogControl encoders / decoders =====
+
+#[cfg(feature = "datalogging")]
+use crate::datalogging::{
+    types::{Configuration, LoggableItem, Operand},
+    EncodingType, RawFormatEncoder,
+};
+#[cfg(feature = "datalogging")]
+use crate::tools::crc32;
+
+/// Encodes a `DataLogControl/GetSetup` response: buffer\_size(4) + encoding(1) + max\_signal\_count(1).
+///
+/// # Errors
+/// Returns `Err(ResponseCode::Overflow)` if `tx_buf` is too small.
+#[cfg(feature = "datalogging")]
+pub fn encode_response_datalogging_get_setup(
+    buffer_size: u32,
+    encoding: EncodingType,
+    max_signal_count: u8,
+    tx_buf: &mut [u8],
+) -> Result<u16, ResponseCode> {
+    const DATALEN: usize = 4 + 1 + 1;
+    if tx_buf.len() < DATALEN {
+        return Err(ResponseCode::Overflow);
+    }
+    tx_buf[0..4].copy_from_slice(&buffer_size.to_be_bytes());
+    tx_buf[4] = encoding as u8;
+    tx_buf[5] = max_signal_count;
+    Ok(DATALEN as u16)
+}
+
+/// Encodes a `DataLogControl/GetStatus` response: state(1) + bytes\_to\_complete(4) + write\_counter(4).
+///
+/// # Errors
+/// Returns `Err(ResponseCode::Overflow)` if `tx_buf` is too small.
+#[cfg(feature = "datalogging")]
+pub fn encode_response_datalogging_get_status(
+    state: u8,
+    bytes_to_complete: u32,
+    write_counter: u32,
+    tx_buf: &mut [u8],
+) -> Result<u16, ResponseCode> {
+    const DATALEN: usize = 1 + 4 + 4;
+    if tx_buf.len() < DATALEN {
+        return Err(ResponseCode::Overflow);
+    }
+    tx_buf[0] = state;
+    tx_buf[1..5].copy_from_slice(&bytes_to_complete.to_be_bytes());
+    tx_buf[5..9].copy_from_slice(&write_counter.to_be_bytes());
+    Ok(DATALEN as u16)
+}
+
+/// Encodes a `DataLogControl/GetAcquisitionMetadata` response.
+/// Wire layout: acq\_id(2) + config\_id(2) + entry\_count(4) + data\_size(4) + points\_after\_trigger(4).
+///
+/// # Errors
+/// Returns `Err(ResponseCode::Overflow)` if `tx_buf` is too small.
+#[cfg(feature = "datalogging")]
+#[allow(clippy::too_many_arguments)]
+pub fn encode_response_datalogging_get_acquisition_metadata(
+    acq_id: u16,
+    config_id: u16,
+    entry_count: u32,
+    data_size: u32,
+    points_after_trigger: u32,
+    tx_buf: &mut [u8],
+) -> Result<u16, ResponseCode> {
+    const DATALEN: usize = 2 + 2 + 4 + 4 + 4;
+    if tx_buf.len() < DATALEN {
+        return Err(ResponseCode::Overflow);
+    }
+    tx_buf[0..2].copy_from_slice(&acq_id.to_be_bytes());
+    tx_buf[2..4].copy_from_slice(&config_id.to_be_bytes());
+    tx_buf[4..8].copy_from_slice(&entry_count.to_be_bytes());
+    tx_buf[8..12].copy_from_slice(&data_size.to_be_bytes());
+    tx_buf[12..16].copy_from_slice(&points_after_trigger.to_be_bytes());
+    Ok(DATALEN as u16)
+}
+
+/// Encodes one chunk of a `DataLogControl/ReadAcquisition` response.
+///
+/// Wire layout: finished(1) + rolling\_counter(1) + acq\_id(2) + data\[..\] \[+ crc(4) when finished\].
+/// Returns `(data_length, finished)`.
+///
+/// # Errors
+/// Returns `Err(ResponseCode::Overflow)` if `tx_buf` has fewer than 8 bytes.
+#[cfg(feature = "datalogging")]
+pub fn encode_response_datalogging_read_acquisition(
+    encoder: &mut RawFormatEncoder,
+    rolling_counter: u8,
+    acq_id: u16,
+    crc: &mut u32,
+    tx_buf: &mut [u8],
+) -> Result<(u16, bool), ResponseCode> {
+    const HEADER: usize = 4;
+    const CRC_SIZE: usize = 4;
+    if tx_buf.len() < HEADER + CRC_SIZE {
+        return Err(ResponseCode::Overflow);
+    }
+
+    let available = tx_buf.len() - HEADER;
+    let nread = encoder.reader_read_chunk(&mut tx_buf[HEADER..HEADER + available]);
+    *crc = crc32(&tx_buf[HEADER..HEADER + nread], *crc);
+
+    let mut finished = false;
+    if encoder.reader_finished() && nread + HEADER + CRC_SIZE <= tx_buf.len() {
+        tx_buf[HEADER + nread..HEADER + nread + CRC_SIZE].copy_from_slice(&crc.to_be_bytes());
+        finished = true;
+    }
+
+    tx_buf[0] = u8::from(finished);
+    tx_buf[1] = rolling_counter;
+    tx_buf[2..4].copy_from_slice(&acq_id.to_be_bytes());
+
+    let total = if finished { HEADER + nread + CRC_SIZE } else { HEADER + nread };
+    Ok((u16::try_from(total).unwrap_or(u16::MAX), finished))
+}
+
+/// Decodes a `DataLogControl/Configure` request payload into `config`.
+/// Returns `(loop_id, config_id)` on success.
+///
+/// # Errors
+/// Returns `Err(ResponseCode)` if the payload is malformed or overflows limits.
+#[cfg(feature = "datalogging")]
+pub(crate) fn decode_datalogging_configure_request(
+    data: &[u8],
+    config: &mut Configuration,
+) -> Result<(u8, u16), ResponseCode> {
+    if data.len() < 16 {
+        return Err(ResponseCode::InvalidRequest);
+    }
+
+    let loop_id = data[0];
+    let config_id = u16::from_be_bytes([data[1], data[2]]);
+
+    config.decimation = u16::from_be_bytes([data[3], data[4]]);
+    config.probe_location = data[5];
+    config.timeout_100ns = u32::from_be_bytes([data[6], data[7], data[8], data[9]]);
+    config.trigger.condition = match crate::datalogging::types::SupportedTriggerConditions::try_from(data[10]) {
+        Ok(c) => c,
+        Err(()) => return Err(ResponseCode::InvalidRequest),
+    };
+    config.trigger.hold_time_100ns = u32::from_be_bytes([data[11], data[12], data[13], data[14]]);
+    config.trigger.operand_count = data[15];
+
+    if config.trigger.operand_count as usize > crate::datalogging::MAX_OPERANDS {
+        return Err(ResponseCode::Overflow);
+    }
+
+    let mut cursor = 16usize;
+
+    for i in 0..config.trigger.operand_count as usize {
+        if data.len() < cursor + 1 {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        let optype = data[cursor];
+        cursor += 1;
+
+        config.trigger.operands[i] = match optype {
+            0 => {
+                // Literal: f32 big-endian
+                if data.len() < cursor + 4 {
+                    return Err(ResponseCode::InvalidRequest);
+                }
+                let bits = u32::from_be_bytes([data[cursor], data[cursor + 1], data[cursor + 2], data[cursor + 3]]);
+                cursor += 4;
+                Operand::Literal(f32::from_bits(bits))
+            }
+            1 => {
+                // Var: type(1) + addr(ADDR_SIZE)
+                if data.len() < cursor + 1 + ADDR_SIZE {
+                    return Err(ResponseCode::InvalidRequest);
+                }
+                let datatype = match crate::types::VariableType::try_from(data[cursor]) {
+                    Ok(t) => t,
+                    Err(()) => return Err(ResponseCode::InvalidRequest),
+                };
+                cursor += 1;
+                let addr = read_be_addr(&data[cursor..]) as *const u8;
+                cursor += ADDR_SIZE;
+                Operand::Var { addr, datatype }
+            }
+            2 => {
+                // VarBit: type(1) + addr(ADDR_SIZE) + bitoffset(1) + bitsize(1)
+                if data.len() < cursor + 3 + ADDR_SIZE {
+                    return Err(ResponseCode::InvalidRequest);
+                }
+                let datatype = match crate::types::VariableType::try_from(data[cursor]) {
+                    Ok(t) => t,
+                    Err(()) => return Err(ResponseCode::InvalidRequest),
+                };
+                cursor += 1;
+                let addr = read_be_addr(&data[cursor..]) as *const u8;
+                cursor += ADDR_SIZE;
+                let bitoffset = data[cursor];
+                cursor += 1;
+                let bitsize = data[cursor];
+                cursor += 1;
+                Operand::VarBit { addr, datatype, bitoffset, bitsize }
+            }
+            3 => {
+                // Rpv: id(2)
+                if data.len() < cursor + 2 {
+                    return Err(ResponseCode::InvalidRequest);
+                }
+                let id = u16::from_be_bytes([data[cursor], data[cursor + 1]]);
+                cursor += 2;
+                Operand::Rpv { id }
+            }
+            _ => return Err(ResponseCode::InvalidRequest),
+        };
+    }
+
+    if data.len() < cursor + 1 {
+        return Err(ResponseCode::InvalidRequest);
+    }
+    config.items_count = data[cursor];
+    cursor += 1;
+
+    if config.items_count as usize > crate::build_config::DATALOGGING_MAX_SIGNAL {
+        return Err(ResponseCode::Overflow);
+    }
+
+    for i in 0..config.items_count as usize {
+        if data.len() < cursor + 1 {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        let item_type = data[cursor];
+        cursor += 1;
+
+        config.items_to_log[i] = match item_type {
+            0 => {
+                // Memory: addr(ADDR_SIZE) + size(1)
+                if data.len() < cursor + ADDR_SIZE + 1 {
+                    return Err(ResponseCode::InvalidRequest);
+                }
+                let address = read_be_addr(&data[cursor..]) as *const u8;
+                cursor += ADDR_SIZE;
+                let size = data[cursor];
+                cursor += 1;
+                LoggableItem::Memory { address, size }
+            }
+            1 => {
+                // Rpv: id(2)
+                if data.len() < cursor + 2 {
+                    return Err(ResponseCode::InvalidRequest);
+                }
+                let id = u16::from_be_bytes([data[cursor], data[cursor + 1]]);
+                cursor += 2;
+                LoggableItem::Rpv { id }
+            }
+            2 => LoggableItem::Time,
+            _ => return Err(ResponseCode::InvalidRequest),
+        };
+    }
+
+    if cursor != data.len() {
+        return Err(ResponseCode::InvalidRequest);
+    }
+
+    Ok((loop_id, config_id))
 }

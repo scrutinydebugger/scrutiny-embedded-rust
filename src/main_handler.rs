@@ -9,10 +9,114 @@ use crate::protocol::definitions::{
 use crate::protocol::definitions::MemoryRegionType;
 use crate::protocol::CommHandler;
 use crate::timebase::Timebase;
-use crate::types::{RuntimePublishedValue, Timediff, Timestamp};
+use crate::types::{AnyType, RuntimePublishedValue, Timediff, Timestamp};
 
 #[cfg(feature = "protected_regions")]
 use crate::types::AddressRange;
+
+#[cfg(feature = "datalogging")]
+use crate::datalogging::{DataLoggerCell, DataloggerHost, State as DlState};
+#[cfg(feature = "datalogging")]
+use crate::ipc::{Loop2MainMsgKind, Main2LoopMsg};
+#[cfg(feature = "datalogging")]
+use crate::protocol::codec_v1_0::{
+    decode_datalogging_configure_request, encode_response_datalogging_get_acquisition_metadata,
+    encode_response_datalogging_get_setup, encode_response_datalogging_get_status,
+    encode_response_datalogging_read_acquisition,
+};
+#[cfg(feature = "datalogging")]
+use crate::protocol::definitions::DataLogControlSubfn;
+
+// ── Datalogging error type ────────────────────────────────────────────────────
+
+#[cfg(feature = "datalogging")]
+/// Error state tracked by the main handler's datalogging subsystem.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DataloggingError {
+    None,
+    UnexpectedClaim,
+    UnexpectedRelease,
+}
+
+// ── Datalogging runtime state (main-handler side) ─────────────────────────────
+
+#[cfg(feature = "datalogging")]
+struct DataloggingState {
+    /// Index into the loops slice of the loop that currently owns the datalogger.
+    owner: Option<u8>,
+    /// Loop index that should take ownership next (triggers a TakeOwnership IPC message).
+    pending_new_owner: Option<u8>,
+    request_release: bool,
+    pending_release: bool,
+    request_arm: bool,
+    request_disarm: bool,
+    reading_in_progress: bool,
+    read_rolling_counter: u8,
+    read_crc: u32,
+    /// Cached state updated via IPC StatusUpdate / DataAcquired messages.
+    cached_state: DlState,
+    cached_bytes_to_complete: usize,
+    cached_write_counter: usize,
+    error: DataloggingError,
+}
+
+#[cfg(feature = "datalogging")]
+impl DataloggingState {
+    const DEFAULT: Self = Self {
+        owner: None,
+        pending_new_owner: None,
+        request_release: false,
+        pending_release: false,
+        request_arm: false,
+        request_disarm: false,
+        reading_in_progress: false,
+        read_rolling_counter: 0,
+        read_crc: 0,
+        cached_state: DlState::Idle,
+        cached_bytes_to_complete: 0,
+        cached_write_counter: 0,
+        error: DataloggingError::None,
+    };
+}
+
+// ── DataloggerHost implementation (inline host for configure / validate) ──────
+
+#[cfg(feature = "datalogging")]
+struct RpvHost {
+    rpvs: Option<&'static [RuntimePublishedValue]>,
+    rpv_read_callback: Option<RpvReadCallback>,
+}
+
+#[cfg(feature = "datalogging")]
+impl DataloggerHost for RpvHost {
+    unsafe fn read_memory(&self, dst: *mut u8, src: *const u8, count: usize) -> bool {
+        // Safety: caller guarantees src range is valid.
+        core::ptr::copy_nonoverlapping(src, dst, count);
+        true
+    }
+
+    fn is_rpv_read_configured(&self) -> bool {
+        self.rpv_read_callback.is_some() && self.rpvs.is_some_and(|s| !s.is_empty())
+    }
+
+    fn rpv_exists(&self, id: u16) -> bool {
+        self.rpvs.is_some_and(|s| s.iter().any(|r| r.id == id))
+    }
+
+    fn get_rpv(&self, id: u16) -> Option<RuntimePublishedValue> {
+        self.rpvs.and_then(|s| s.iter().find(|r| r.id == id).copied())
+    }
+
+    fn read_rpv(&self, rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
+        if let Some(cb) = self.rpv_read_callback {
+            cb(rpv, out)
+        } else {
+            false
+        }
+    }
+}
+
+// ── MainHandler ───────────────────────────────────────────────────────────────
 
 /// Top-level Scrutiny handler. Owns the communication buffers and drives the protocol.
 pub struct MainHandler<'rxbuf, 'txbuf> {
@@ -37,6 +141,10 @@ pub struct MainHandler<'rxbuf, 'txbuf> {
     readonly_ranges: Option<&'static [AddressRange]>,
     process_again_timestamp: Timestamp,
     process_again_timestamp_taken: bool,
+    #[cfg(feature = "datalogging")]
+    datalogger_cell: Option<&'static DataLoggerCell<'static>>,
+    #[cfg(feature = "datalogging")]
+    dl: DataloggingState,
 }
 
 impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
@@ -58,6 +166,8 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         let forbidden_ranges = config.forbidden_ranges();
         #[cfg(feature = "protected_regions")]
         let readonly_ranges = config.readonly_ranges();
+        #[cfg(feature = "datalogging")]
+        let datalogger_cell = config.get_datalogger_cell();
 
         let comm = CommHandler::new(rx_buf, tx_buf, seed);
         let enabled = comm.is_enabled();
@@ -84,6 +194,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             readonly_ranges,
             process_again_timestamp: 0,
             process_again_timestamp_taken: false,
+            #[cfg(feature = "datalogging")]
+            datalogger_cell,
+            #[cfg(feature = "datalogging")]
+            dl: DataloggingState::DEFAULT,
         })
     }
 
@@ -94,11 +208,20 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             self.disconnect_pending = false;
             self.process_again_timestamp_taken = false;
             self.comm.reset(&self.timebase);
+            #[cfg(feature = "datalogging")]
+            if let Some(cell) = self.datalogger_cell {
+                // Safety: no loop owns the datalogger when handler is disabled.
+                unsafe { cell.get() }.reset();
+            }
             return;
         }
 
         self.timebase.step(timestep_100ns);
         self.comm.process(&self.timebase);
+
+        self.process_loops();
+        #[cfg(feature = "datalogging")]
+        self.process_datalogging_logic();
 
         if self.comm.request_received() && !self.processing_request {
             let Some((cmd_id, subfn_id, data_len)) = self.comm.get_request() else {
@@ -108,14 +231,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
 
             let data_len_usize = usize::from(data_len);
             if data_len_usize > self.rx_buf.len() {
-                // CommHandler guarantees data_length <= rx_buf.len(), so this is unreachable
-                // in normal operation. Bail silently rather than panic.
                 self.enabled = false;
                 return;
             }
 
-            // Reset so dispatch always starts from a clean response; prevents stale
-            // data_length from a previous ProcessAgain cycle leaking into the response.
             self.comm.active_response_mut().reset();
 
             let code = self.dispatch(cmd_id, subfn_id, data_len_usize);
@@ -154,6 +273,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 }
             }
         }
+
+        self.process_loops();
+        #[cfg(feature = "datalogging")]
+        self.process_datalogging_logic();
 
         self.check_finished_sending();
     }
@@ -207,8 +330,106 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         }
     }
 
+    // ── Loop / datalogging IPC pumps ──────────────────────────────────────────
+
+    fn process_loops(&mut self) {
+        let Some(loops) = self.loops else { return };
+        for i in 0..loops.len() {
+            #[cfg(feature = "datalogging")]
+            if let Some(msg) = loops[i].loop2main().pop() {
+                self.handle_loop2main_msg(i as u8, msg);
+            }
+            // Non-datalogging builds have nothing to do here yet.
+            #[cfg(not(feature = "datalogging"))]
+            let _ = i;
+        }
+    }
+
+    #[cfg(feature = "datalogging")]
+    fn handle_loop2main_msg(&mut self, loop_idx: u8, msg: crate::ipc::Loop2MainMsg) {
+        match msg.kind {
+            Loop2MainMsgKind::OwnershipTaken => {
+                if self.dl.owner.is_some() {
+                    self.dl.error = DataloggingError::UnexpectedClaim;
+                }
+                self.dl.owner = Some(loop_idx);
+            }
+            Loop2MainMsgKind::OwnershipReleased => {
+                if self.dl.owner != Some(loop_idx) {
+                    self.dl.error = DataloggingError::UnexpectedRelease;
+                }
+                self.dl.owner = None;
+                self.dl.pending_release = false;
+                if let Some(cell) = self.datalogger_cell {
+                    // Safety: no loop owns the datalogger after release.
+                    unsafe { cell.get() }.reset();
+                }
+            }
+            Loop2MainMsgKind::DataAcquired => {
+                self.dl.cached_state = DlState::AcquisitionCompleted;
+            }
+            Loop2MainMsgKind::StatusUpdate => {
+                self.dl.cached_state = msg.state;
+                self.dl.cached_bytes_to_complete = msg.bytes_to_complete;
+                self.dl.cached_write_counter = msg.write_counter;
+                if msg.state != DlState::AcquisitionCompleted {
+                    self.dl.reading_in_progress = false;
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "datalogging")]
+    fn process_datalogging_logic(&mut self) {
+        if self.dl.error != DataloggingError::None {
+            return;
+        }
+
+        let Some(loops) = self.loops else { return };
+
+        if self.dl.owner.is_none() {
+            // When no loop owns the datalogger we can read state directly.
+            if let Some(cell) = self.datalogger_cell {
+                // Safety: no loop owns the datalogger.
+                self.dl.cached_state = unsafe { cell.get() }.get_state();
+            }
+
+            if let Some(new_owner_idx) = self.dl.pending_new_owner {
+                let loop_handler = &loops[new_owner_idx as usize];
+                if !loop_handler.main2loop().has_content() {
+                    loop_handler.main2loop().send(Main2LoopMsg::TakeOwnership);
+                    self.dl.pending_new_owner = None;
+                }
+            }
+
+            // Can't arm/disarm without an owner.
+            self.dl.request_arm = false;
+            self.dl.request_disarm = false;
+        } else if let Some(owner_idx) = self.dl.owner {
+            let loop_handler = &loops[owner_idx as usize];
+            if !loop_handler.main2loop().has_content() {
+                if self.dl.request_release {
+                    loop_handler.main2loop().send(Main2LoopMsg::ReleaseOwnership);
+                    self.dl.request_release = false;
+                    self.dl.pending_release = true;
+                } else if self.dl.request_arm {
+                    loop_handler.main2loop().send(Main2LoopMsg::ArmTrigger);
+                    self.dl.request_arm = false;
+                } else if self.dl.request_disarm {
+                    loop_handler.main2loop().send(Main2LoopMsg::DisarmTrigger);
+                    self.dl.request_disarm = false;
+                }
+            }
+        }
+    }
+
     fn dispatch(&mut self, cmd_id: u8, subfn_id: u8, data_len: usize) -> ResponseCode {
         let data = &self.rx_buf[..data_len];
+        #[cfg(feature = "datalogging")]
+        let dl_enabled = self.datalogger_cell.is_some()
+            && self.loops.is_some_and(|l| l.iter().any(|h| h.datalogging_allowed()));
+        #[cfg(not(feature = "datalogging"))]
+        let dl_enabled = false;
         match CommandId::try_from(cmd_id) {
             Ok(CommandId::GetInfo) => Self::process_get_info(
                 &mut self.comm,
@@ -221,6 +442,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 self.forbidden_ranges,
                 #[cfg(feature = "protected_regions")]
                 self.readonly_ranges,
+                dl_enabled,
                 subfn_id,
                 data,
             ),
@@ -248,8 +470,27 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 subfn_id,
                 data,
             ),
-            Ok(CommandId::UserCommand | CommandId::DataLogControl) | Err(()) => {
-                ResponseCode::UnsupportedFeature
+            Ok(CommandId::UserCommand) | Err(()) => ResponseCode::UnsupportedFeature,
+            #[cfg(not(feature = "datalogging"))]
+            Ok(CommandId::DataLogControl) => ResponseCode::UnsupportedFeature,
+            #[cfg(feature = "datalogging")]
+            Ok(CommandId::DataLogControl) => {
+                let Some(cell) = self.datalogger_cell else {
+                    return ResponseCode::UnsupportedFeature;
+                };
+                Self::process_datalog_control(
+                    &mut self.comm,
+                    &mut *self.tx_buf,
+                    self.loops,
+                    self.rpvs,
+                    self.rpv_read_callback,
+                    cell,
+                    &mut self.dl,
+                    #[cfg(feature = "protected_regions")]
+                    self.forbidden_ranges,
+                    subfn_id,
+                    data,
+                )
             }
         }
     }
@@ -266,6 +507,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         loops: Option<&'static [LoopHandler]>,
         #[cfg(feature = "protected_regions")] forbidden_ranges: Option<&'static [AddressRange]>,
         #[cfg(feature = "protected_regions")] readonly_ranges: Option<&'static [AddressRange]>,
+        datalogging_enabled: bool,
         subfn_id: u8,
         data: &[u8],
     ) -> ResponseCode {
@@ -294,9 +536,14 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 #[cfg(not(feature = "support_64bits"))]
                 let support_64bits = false;
 
+                #[cfg(feature = "datalogging")]
+                let dl = datalogging_enabled;
+                #[cfg(not(feature = "datalogging"))]
+                let dl = false;
+
                 match codec_v1_0::encode_response_get_info_supported_features(
                     memory_write_enable,
-                    false, // datalogging not yet implemented
+                    dl,
                     user_command_configured,
                     support_64bits,
                     tx_buf,
@@ -397,7 +644,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(GetInfoSubfn::GetRuntimePublishedValuesDefinition) => {
-                // Request: start_index(2) + count(2) = 4 bytes
                 if data.len() != 4 {
                     return ResponseCode::InvalidRequest;
                 }
@@ -437,7 +683,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(GetInfoSubfn::GetLoopDefinition) => {
-                // Request: loop_id(1) = 1 byte
                 if data.len() != 1 {
                     return ResponseCode::InvalidRequest;
                 }
@@ -492,7 +737,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(CommControlSubfn::Heartbeat) => {
-                // Request: session_id(4) + challenge(2) = 6 bytes exactly.
                 if data.len() != 6 {
                     return ResponseCode::InvalidRequest;
                 }
@@ -526,7 +770,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                     build_config::COMM_HEARTBEAT_TIMEOUT_US,
                     build_config::COMM_RX_TIMEOUT_US,
                     addr_size,
-                    8, // Rust does not support 16 bits bytes
+                    8,
                     tx_buf,
                 ) {
                     Ok(len) => {
@@ -558,7 +802,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(CommControlSubfn::Disconnect) => {
-                // Request: session_id(4) = 4 bytes exactly.
                 if data.len() != 4 {
                     return ResponseCode::InvalidRequest;
                 }
@@ -593,7 +836,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
     ) -> ResponseCode {
         match MemoryControlSubfn::try_from(subfn_id) {
             Ok(MemoryControlSubfn::Read) => {
-                // Safety: reading arbitrary memory is the protocol's intended purpose.
                 let result = unsafe {
                     codec_v1_0::encode_response_memory_control_read(
                         data,
@@ -612,7 +854,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(MemoryControlSubfn::Write) => {
-                // Safety: writing arbitrary memory is the protocol's intended purpose.
                 let result = unsafe {
                     codec_v1_0::encode_response_memory_control_write(
                         data,
@@ -634,7 +875,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(MemoryControlSubfn::WriteMasked) => {
-                // Safety: writing arbitrary memory is the protocol's intended purpose.
                 let result = unsafe {
                     codec_v1_0::encode_response_memory_control_write_masked(
                         data,
@@ -677,6 +917,203 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
 
             Err(()) => ResponseCode::UnsupportedFeature,
         }
+    }
+
+    // ===== DataLogControl =====
+
+    #[cfg(feature = "datalogging")]
+    #[allow(clippy::too_many_arguments)]
+    fn process_datalog_control(
+        comm: &mut CommHandler,
+        tx_buf: &mut [u8],
+        loops: Option<&'static [LoopHandler]>,
+        rpvs: Option<&'static [RuntimePublishedValue]>,
+        rpv_read_callback: Option<RpvReadCallback>,
+        cell: &'static DataLoggerCell<'static>,
+        dl: &mut DataloggingState,
+        #[cfg(feature = "protected_regions")] forbidden_ranges: Option<&'static [AddressRange]>,
+        subfn_id: u8,
+        data: &[u8],
+    ) -> ResponseCode {
+        let host = RpvHost { rpvs, rpv_read_callback };
+
+        let code = match DataLogControlSubfn::try_from(subfn_id) {
+            Err(()) => return ResponseCode::UnsupportedFeature,
+
+            Ok(DataLogControlSubfn::GetSetup) => {
+                let buf_size = u32::try_from(cell.buffer_size()).unwrap_or(u32::MAX);
+                let encoding = crate::datalogging::RawFormatEncoder::get_encoding();
+                let max_signals = u8::try_from(crate::build_config::DATALOGGING_MAX_SIGNAL).unwrap_or(u8::MAX);
+                match encode_response_datalogging_get_setup(buf_size, encoding, max_signals, tx_buf) {
+                    Ok(len) => { comm.active_response_mut().data_length = len; ResponseCode::Ok }
+                    Err(e) => e,
+                }
+            }
+
+            Ok(DataLogControlSubfn::ConfigureDatalog) => {
+                dl.reading_in_progress = false;
+
+                if dl.owner.is_some() {
+                    if !dl.pending_release {
+                        dl.request_release = true;
+                    }
+                    return ResponseCode::ProcessAgain;
+                }
+
+                // Safety: no loop owns the datalogger right now.
+                let dl_obj = unsafe { cell.get() };
+
+                let parse_result = decode_datalogging_configure_request(data, dl_obj.config_mut());
+                let (loop_id, config_id) = match parse_result {
+                    Ok(ids) => ids,
+                    Err(e) => { dl_obj.reset(); return e; }
+                };
+
+                let Some(loop_slice) = loops else { dl_obj.reset(); return ResponseCode::FailureToProceed; };
+                if loop_id as usize >= loop_slice.len() { dl_obj.reset(); return ResponseCode::FailureToProceed; }
+                if !loop_slice[loop_id as usize].datalogging_allowed() { dl_obj.reset(); return ResponseCode::Forbidden; }
+
+                // Validate forbidden regions for Var/VarBit operands and Memory items.
+                #[cfg(feature = "protected_regions")]
+                if let Some(forbidden) = forbidden_ranges {
+                    use crate::datalogging::types::{Operand, LoggableItem};
+                    use crate::tools::TypeSize;
+                    let config = dl_obj.config_ref();
+                    let mut region_err = false;
+                    'outer: for i in 0..config.trigger.operand_count as usize {
+                        let touches = match config.trigger.operands[i] {
+                            Operand::Var { addr, datatype } =>
+                                codec_v1_0::region_overlaps(addr as usize, datatype.type_size() as usize, forbidden),
+                            Operand::VarBit { addr, datatype, .. } =>
+                                codec_v1_0::region_overlaps(addr as usize, datatype.type_size() as usize, forbidden),
+                            _ => false,
+                        };
+                        if touches { region_err = true; break 'outer; }
+                    }
+                    if !region_err {
+                        for i in 0..config.items_count as usize {
+                            if let LoggableItem::Memory { address, size } = config.items_to_log[i] {
+                                if codec_v1_0::region_overlaps(address as usize, size as usize, forbidden) {
+                                    region_err = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if region_err { dl_obj.reset(); return ResponseCode::Forbidden; }
+                }
+
+                dl_obj.configure(&Timebase::new(), config_id, &host);
+
+                if dl_obj.config_valid() {
+                    dl.pending_new_owner = Some(loop_id);
+                    ResponseCode::Ok
+                } else {
+                    dl_obj.reset();
+                    ResponseCode::InvalidRequest
+                }
+            }
+
+            Ok(DataLogControlSubfn::ArmTrigger) => {
+                if dl.owner.is_none() || dl.pending_release {
+                    return ResponseCode::FailureToProceed;
+                }
+                dl.request_arm = true;
+                ResponseCode::Ok
+            }
+
+            Ok(DataLogControlSubfn::DisarmTrigger) => {
+                if dl.owner.is_none() || dl.pending_release {
+                    return ResponseCode::FailureToProceed;
+                }
+                dl.request_disarm = true;
+                ResponseCode::Ok
+            }
+
+            Ok(DataLogControlSubfn::GetStatus) => {
+                let state = dl.cached_state as u8;
+                let bytes = u32::try_from(dl.cached_bytes_to_complete).unwrap_or(u32::MAX);
+                let counter = u32::try_from(dl.cached_write_counter).unwrap_or(u32::MAX);
+                match encode_response_datalogging_get_status(state, bytes, counter, tx_buf) {
+                    Ok(len) => { comm.active_response_mut().data_length = len; ResponseCode::Ok }
+                    Err(e) => e,
+                }
+            }
+
+            Ok(DataLogControlSubfn::GetAcquisitionMetadata) => {
+                if dl.cached_state != DlState::AcquisitionCompleted {
+                    return ResponseCode::FailureToProceed;
+                }
+                // Safety: AcquisitionCompleted means the loop owns but is idle — safe to read.
+                let dl_obj = unsafe { cell.get() };
+                let acq_id = dl_obj.get_acquisition_id();
+                let config_id = dl_obj.get_config_id();
+                let entry_count = u32::try_from(dl_obj.get_encoder().get_entry_count()).unwrap_or(u32::MAX);
+                let data_size = u32::try_from(dl_obj.get_encoder().reader_total_size()).unwrap_or(u32::MAX);
+                let after_trigger = u32::try_from(dl_obj.log_points_after_trigger()).unwrap_or(u32::MAX);
+                match encode_response_datalogging_get_acquisition_metadata(
+                    acq_id, config_id, entry_count, data_size, after_trigger, tx_buf,
+                ) {
+                    Ok(len) => { comm.active_response_mut().data_length = len; ResponseCode::Ok }
+                    Err(e) => e,
+                }
+            }
+
+            Ok(DataLogControlSubfn::ReadAcquisition) => {
+                if dl.owner.is_none() {
+                    return ResponseCode::FailureToProceed;
+                }
+                if dl.cached_state != DlState::AcquisitionCompleted {
+                    dl.reading_in_progress = false;
+                    return ResponseCode::FailureToProceed;
+                }
+                // Safety: AcquisitionCompleted and we own the slot — loop is idle.
+                let dl_obj = unsafe { cell.get() };
+                if !dl.reading_in_progress {
+                    dl_obj.get_encoder_mut().reset_reader();
+                    dl.reading_in_progress = true;
+                    dl.read_rolling_counter = 0;
+                    dl.read_crc = 0;
+                }
+                let acq_id = dl_obj.get_acquisition_id();
+                match encode_response_datalogging_read_acquisition(
+                    dl_obj.get_encoder_mut(),
+                    dl.read_rolling_counter,
+                    acq_id,
+                    &mut dl.read_crc,
+                    tx_buf,
+                ) {
+                    Ok((len, finished)) => {
+                        comm.active_response_mut().data_length = len;
+                        dl.read_rolling_counter = dl.read_rolling_counter.wrapping_add(1);
+                        if finished {
+                            dl.reading_in_progress = false;
+                        }
+                        ResponseCode::Ok
+                    }
+                    Err(e) => {
+                        dl.reading_in_progress = false;
+                        e
+                    }
+                }
+            }
+
+            Ok(DataLogControlSubfn::ResetDatalogger) => {
+                if dl.owner.is_some() {
+                    if !dl.pending_release {
+                        dl.request_release = true;
+                    }
+                    return ResponseCode::ProcessAgain;
+                }
+                // Safety: no loop owns the datalogger.
+                unsafe { cell.get() }.reset();
+                ResponseCode::Ok
+            }
+        };
+
+        // On configure failure (not ProcessAgain), the datalogger has already been reset above.
+        let _ = host; // suppress unused warning
+        code
     }
 }
 

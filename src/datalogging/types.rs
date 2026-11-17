@@ -47,7 +47,7 @@ pub enum Operand {
 }
 
 impl Operand {
-    const DEFAULT: Self = Operand::Literal(0.0);
+    const DEFAULT: Self = Self::Literal(0.0);
 }
 
 // Safety: raw pointers in Operand are static/hardware memory addresses managed by the caller.
@@ -67,6 +67,24 @@ pub enum SupportedTriggerConditions {
     GreaterOrEqualThan = 6,
     ChangeMoreThan = 7,
     IsWithin = 8,
+}
+
+impl TryFrom<u8> for SupportedTriggerConditions {
+    type Error = ();
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            x if x == Self::AlwaysTrue as u8 => Ok(Self::AlwaysTrue),
+            x if x == Self::Equal as u8 => Ok(Self::Equal),
+            x if x == Self::NotEqual as u8 => Ok(Self::NotEqual),
+            x if x == Self::LessThan as u8 => Ok(Self::LessThan),
+            x if x == Self::LessOrEqualThan as u8 => Ok(Self::LessOrEqualThan),
+            x if x == Self::GreaterThan as u8 => Ok(Self::GreaterThan),
+            x if x == Self::GreaterOrEqualThan as u8 => Ok(Self::GreaterOrEqualThan),
+            x if x == Self::ChangeMoreThan as u8 => Ok(Self::ChangeMoreThan),
+            x if x == Self::IsWithin as u8 => Ok(Self::IsWithin),
+            _ => Err(()),
+        }
+    }
 }
 
 
@@ -101,7 +119,7 @@ pub enum LoggableItem {
 }
 
 impl LoggableItem {
-    pub const DEFAULT: Self = LoggableItem::Memory {
+    pub const DEFAULT: Self = Self::Memory {
         address: core::ptr::null(),
         size: 0,
     };

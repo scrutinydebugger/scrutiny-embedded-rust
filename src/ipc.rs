@@ -97,6 +97,48 @@ impl<T: Copy> IpcMessage<T, StdAtomicFlag> {
     }
 }
 
+// ===== Datalogging IPC message types =====
+
+#[cfg(feature = "datalogging")]
+/// Messages the main handler sends to a loop handler.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Main2LoopMsg {
+    TakeOwnership,
+    ReleaseOwnership,
+    ArmTrigger,
+    DisarmTrigger,
+}
+
+#[cfg(feature = "datalogging")]
+/// Messages a loop handler sends back to the main handler.
+#[derive(Clone, Copy, Debug)]
+pub struct Loop2MainMsg {
+    pub kind: Loop2MainMsgKind,
+    pub state: crate::datalogging::State,
+    pub bytes_to_complete: usize,
+    pub write_counter: usize,
+}
+
+#[cfg(feature = "datalogging")]
+impl Loop2MainMsg {
+    pub(crate) const DEFAULT: Self = Self {
+        kind: Loop2MainMsgKind::StatusUpdate,
+        state: crate::datalogging::State::Idle,
+        bytes_to_complete: 0,
+        write_counter: 0,
+    };
+}
+
+#[cfg(feature = "datalogging")]
+/// Discriminant for `Loop2MainMsg`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Loop2MainMsgKind {
+    OwnershipTaken,
+    OwnershipReleased,
+    DataAcquired,
+    StatusUpdate,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

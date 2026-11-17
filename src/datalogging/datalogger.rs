@@ -356,6 +356,12 @@ impl<'buf> DataLogger<'buf> {
 
     // ── Accessors ─────────────────────────────────────────────────────────────
 
+    /// Total byte capacity of the acquisition buffer.
+    #[inline]
+    pub fn buffer_size(&self) -> usize {
+        self.buffer_size
+    }
+
     #[inline]
     pub fn data_acquired(&self) -> bool {
         self.state == State::AcquisitionCompleted

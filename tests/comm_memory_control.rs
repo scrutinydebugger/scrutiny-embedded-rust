@@ -903,6 +903,39 @@ fn test_read_rpv_unknown_id() {
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
 }
 
+#[test]
+fn test_read_rpv_empty_request() {
+    // An empty ReadRPV request is invalid, as in C++.
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(&TEST_RPVS, Some(rpv_read_cb), Some(rpv_write_cb_ok));
+    let mut h = MainHandler::new(cfg).unwrap();
+    connect(&mut h);
+
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &[]);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
+}
+
+#[test]
+fn test_read_rpv_empty_rpv_list() {
+    // An empty RPV list means the feature is not configured.
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(&[], Some(rpv_read_cb), None);
+    let mut h = MainHandler::new(cfg).unwrap();
+    connect(&mut h);
+
+    let payload = [0x11u8, 0x22];
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8);
+}
+
 // ── MemoryControl/WriteRpv ───────────────────────────────────────────────────
 
 #[test]
@@ -1033,6 +1066,40 @@ fn test_write_rpv_callback_failure() {
     let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
+}
+
+#[test]
+fn test_write_rpv_empty_request() {
+    // An empty WriteRPV request is invalid.
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(&TEST_RPVS, Some(rpv_read_cb), Some(rpv_write_cb_ok));
+    let mut h = MainHandler::new(cfg).unwrap();
+    connect(&mut h);
+
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &[]);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
+}
+
+#[test]
+fn test_write_rpv_empty_rpv_list() {
+    // An empty RPV list means the feature is not configured.
+    let mut rx = [0u8; 128];
+    let mut tx = [0u8; 128];
+    let mut cfg = Config::new();
+    cfg.set_buffers(&mut rx, &mut tx);
+    cfg.set_published_values(&[], None, Some(rpv_write_cb_ok));
+    let mut h = MainHandler::new(cfg).unwrap();
+    connect(&mut h);
+
+    let mut payload = vec![0x11u8, 0x22];
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let resp = send_and_recv(&mut h, &req);
+    assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8);
 }
 
 // ── Subfn routing ────────────────────────────────────────────────────────────

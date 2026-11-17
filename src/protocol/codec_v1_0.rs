@@ -733,9 +733,9 @@ pub unsafe fn encode_response_memory_control_write_masked(
 /// and the value is written as `id(2) + value(type_size)` in the response.
 ///
 /// # Errors
-/// - `UnsupportedFeature` if no RPVs or no read callback is configured.
-/// - `InvalidRequest` if `data` length is odd or an RPV ID is not found.
-/// - `FailureToProceed` if the read callback returns `false`.
+/// - `UnsupportedFeature` if the RPV list is missing or empty, or no read callback is configured.
+/// - `InvalidRequest` if `data` is empty or its length is odd.
+/// - `FailureToProceed` if an RPV ID is not found or the read callback returns `false`.
 /// - `Overflow` if the response exceeds `tx_buf`.
 pub fn encode_response_memory_control_read_rpv(
     data: &[u8],
@@ -746,10 +746,16 @@ pub fn encode_response_memory_control_read_rpv(
     let Some(rpvs) = rpvs else {
         return Err(ResponseCode::UnsupportedFeature);
     };
+    if rpvs.is_empty() {
+        return Err(ResponseCode::UnsupportedFeature);
+    }
     let Some(read_cb) = read_cb else {
         return Err(ResponseCode::UnsupportedFeature);
     };
 
+    if data.is_empty() {
+        return Err(ResponseCode::InvalidRequest);
+    }
     if !data.len().is_multiple_of(2) {
         return Err(ResponseCode::InvalidRequest);
     }
@@ -793,9 +799,9 @@ pub fn encode_response_memory_control_read_rpv(
 /// The response echoes `id(2) + type_size(1)` per entry.
 ///
 /// # Errors
-/// - `UnsupportedFeature` if no RPVs or no write callback is configured.
-/// - `InvalidRequest` if the data does not parse into valid entries.
-/// - `FailureToProceed` if an RPV ID is not found or the write callback returns `false`.
+/// - `UnsupportedFeature` if the RPV list is missing or empty, or no write callback is configured.
+/// - `InvalidRequest` if `data` is empty, does not parse into valid entries, or an RPV ID is not found.
+/// - `FailureToProceed` if the write callback returns `false`.
 /// - `Overflow` if the response exceeds `tx_buf`.
 pub fn encode_response_memory_control_write_rpv(
     data: &[u8],
@@ -806,6 +812,9 @@ pub fn encode_response_memory_control_write_rpv(
     let Some(rpvs) = rpvs else {
         return Err(ResponseCode::UnsupportedFeature);
     };
+    if rpvs.is_empty() {
+        return Err(ResponseCode::UnsupportedFeature);
+    }
     let Some(write_cb) = write_cb else {
         return Err(ResponseCode::UnsupportedFeature);
     };

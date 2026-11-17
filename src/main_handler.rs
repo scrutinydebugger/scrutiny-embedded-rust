@@ -10,7 +10,9 @@ use crate::protocol::definitions::{
 use crate::protocol::definitions::MemoryRegionType;
 use crate::protocol::CommHandler;
 use crate::timebase::Timebase;
-use crate::types::{AnyType, RuntimePublishedValue, Timediff, Timestamp};
+use crate::types::{RuntimePublishedValue, Timediff, Timestamp};
+#[cfg(feature = "datalogging")]
+use crate::types::AnyType;
 
 #[cfg(feature = "protected_regions")]
 use crate::types::AddressRange;

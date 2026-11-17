@@ -692,11 +692,11 @@ pub unsafe fn encode_response_memory_control_write_masked(
     let mut tx_cursor = 0usize;
     for item in WriteBlockParser::new(data, true) {
         let block = item?;
-        let len_usize = usize::from(block.len);
         let mask = block.mask.unwrap_or(&[]); // always Some for masked=true; unwrap_or for safety
 
         #[cfg(feature = "protected_regions")]
         {
+            let len_usize = usize::from(block.len);
             if let Some(ranges) = forbidden {
                 if region_overlaps(block.addr, len_usize, ranges) {
                     return Err(ResponseCode::Forbidden);

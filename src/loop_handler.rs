@@ -1,3 +1,4 @@
+#[cfg(feature = "datalogging")]
 use crate::types::Timediff;
 
 #[cfg(feature = "datalogging")]

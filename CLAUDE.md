@@ -25,11 +25,18 @@ cargo clippy --all-features -- -D warnings
 
 ## Architecture
 
+- Follow the C++ module architecture as much as possible
 - `no_std` by default. `std` is a feature used only to enable the test harness.
 - No heap allocation. No `Box`, `Vec`, `String`, or any allocator type.
 - No `unwrap()`, no `expect()` in library code. Use `Result` or explicit match.
 - No `panic!` in library code except inside `#[cfg(test)]`.
 - Caller-provided buffers everywhere (mirrors the C++ design).
+- Mimic the C++ public API. User need to isntantiate MainHandler + LoopHandler (optional). Define global buffers and pass through a config. 
+- Unsafe code allowed in those conditions:
+  - Raw read/write to the memory.
+  - Datalogging reading data.
+  - Datalogger ownership transfer between time domain.
+  - Datalogger interpretation of the memory.
 
 ## Cargo Features
 
@@ -43,10 +50,10 @@ cargo clippy --all-features -- -D warnings
 
 ## Code Style
 
-- Follow the C++ module boundaries — one Rust module per C++ source file pair.
 - Time unit throughout: 100ns increments (`u32`), type alias `Timediff`.
 - Port enums as Rust enums, not integer constants.
 - Port C++ callback pointers as function pointers (`fn(...) -> ...`), not closures.
 - All public types and functions must have a one-line doc comment.
 - Edits needs to pass linting test
 - No borrow checker workaround to be used unless direct memory access is required as per the design of this project or a memory optimization is required. Otherwise, if a C++ approach cannot eb ported, propose an idiomatic Rust alternative approach to the user for review.
+

@@ -49,6 +49,10 @@ struct DataloggingState {
     pending_new_owner: Option<u8>,
     request_release: bool,
     pending_release: bool,
+    /// Whether to reset the datalogger when `OwnershipReleased` arrives.
+    /// Default true. Set to false when releasing just to grant main exclusive access for a read,
+    /// so the acquisition data stays intact.
+    reset_on_release: bool,
     request_arm: bool,
     request_disarm: bool,
     reading_in_progress: bool,
@@ -68,6 +72,7 @@ impl DataloggingState {
         pending_new_owner: None,
         request_release: false,
         pending_release: false,
+        reset_on_release: true,
         request_arm: false,
         request_disarm: false,
         reading_in_progress: false,
@@ -413,10 +418,15 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 }
                 self.dl.owner = None;
                 self.dl.pending_release = false;
-                if let Some(ref cell) = self.datalogger_cell {
-                    // Safety: no loop owns the datalogger after release.
-                    unsafe { cell.get() }.reset();
+                if self.dl.reset_on_release {
+                    if let Some(ref cell) = self.datalogger_cell {
+                        // Safety: no loop owns the datalogger after release.
+                        unsafe { cell.get() }.reset();
+                    }
                 }
+                // Restore default so the next release cycle resets unless an explicit
+                // "release-for-read" flow asks otherwise.
+                self.dl.reset_on_release = true;
             }
             Loop2MainMsgKind::DataAcquired => {
                 self.dl.cached_state = DlState::AcquisitionCompleted;
@@ -1126,10 +1136,19 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(DataLogControlSubfn::GetAcquisitionMetadata) => {
-                if dl.owner.is_none() || dl.cached_state != DlState::AcquisitionCompleted {
+                if dl.cached_state != DlState::AcquisitionCompleted {
                     return ResponseCode::FailureToProceed;
                 }
-                // Safety: owner is Some and state is AcquisitionCompleted — loop is idle, safe to read.
+                if dl.owner.is_some() {
+                    // Loop still owns the datalogger; request a release that preserves the
+                    // acquisition data, then retry when ownership is gone.
+                    if !dl.pending_release {
+                        dl.reset_on_release = false;
+                        dl.request_release = true;
+                    }
+                    return ResponseCode::ProcessAgain;
+                }
+                // Safety: owner is None — no concurrent loop access.
                 let dl_obj = unsafe { cell.get() };
                 let acq_id = dl_obj.get_acquisition_id();
                 let config_id = dl_obj.get_config_id();
@@ -1145,14 +1164,18 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
             }
 
             Ok(DataLogControlSubfn::ReadAcquisition) => {
-                if dl.owner.is_none() {
-                    return ResponseCode::FailureToProceed;
-                }
                 if dl.cached_state != DlState::AcquisitionCompleted {
                     dl.reading_in_progress = false;
                     return ResponseCode::FailureToProceed;
                 }
-                // Safety: AcquisitionCompleted and we own the slot — loop is idle.
+                if dl.owner.is_some() {
+                    if !dl.pending_release {
+                        dl.reset_on_release = false;
+                        dl.request_release = true;
+                    }
+                    return ResponseCode::ProcessAgain;
+                }
+                // Safety: owner is None — no concurrent loop access.
                 let dl_obj = unsafe { cell.get() };
                 if !dl.reading_in_progress {
                     dl_obj.get_encoder_mut().reset_reader();

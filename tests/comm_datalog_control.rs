@@ -243,6 +243,25 @@ fn run_until_acquisition(h: &mut MainHandler<'_, '_>, loop_handler: &LoopHandler
     panic!("Acquisition did not complete within 500 iterations");
 }
 
+// Send a DataLogControl request that may trigger a release-for-read IPC roundtrip
+// (e.g. GetAcquisitionMetadata or ReadAcquisition while a loop still owns the datalogger).
+// Returns the response. Drives any ProcessAgain / release handshake transparently.
+fn send_and_recv_with_release(h: &mut MainHandler<'_, '_>, loop_handler: &LoopHandler, req: &[u8]) -> Vec<u8> {
+    h.receive_data(req);
+    // First tick: dispatch; on ProcessAgain, main-handler sets request_release=true and the
+    // ReleaseOwnership IPC is sent at the end of this process() call.
+    h.process(0);
+    if h.data_to_send() > 0 {
+        return pop_response(h);
+    }
+    // Loop acknowledges the release.
+    loop_handler.process(0);
+    // Next tick: main receives OwnershipReleased (owner=None, data preserved because
+    // reset_on_release was false); the request is re-dispatched and the response is queued.
+    h.process(0);
+    pop_response(h)
+}
+
 fn make_handler_with_loops<'rx, 'tx>(
     rx: &'rx mut [u8],
     tx: &'tx mut [u8],
@@ -890,9 +909,9 @@ fn test_get_acquisition_metadata() {
     do_arm_trigger(&mut h, loop0);
     run_until_acquisition(&mut h, loop0);
 
-    // After acquisition: expect Ok with metadata
+    // After acquisition: loop still owns; main must release-for-read first.
     let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
-    let resp = send_and_recv(&mut h, &req);
+    let resp = send_and_recv_with_release(&mut h, loop0, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "acquisition complete");
     let p = resp_payload(&resp);
@@ -944,12 +963,7 @@ fn test_read_acquisition_one_transfer() {
     run_until_acquisition(&mut h, loop0);
 
     let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ReadAcquisition as u8, &[]);
-    h.receive_data(&req);
-    h.process(0);
-    let n = h.data_to_send() as usize;
-    assert!(n > 0, "should have data to send");
-    let mut out = vec![0u8; n];
-    h.pop_data(&mut out);
+    let out = send_and_recv_with_release(&mut h, loop0, &req);
     h.process(0);
 
     assert_eq!(resp_code(&out), ResponseCode::Ok as u8);
@@ -1020,7 +1034,12 @@ fn test_read_acquisition_multiple_transfers() {
 
     for i in 0..max_iterations {
         let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ReadAcquisition as u8, &[]);
-        let resp = send_and_recv(&mut h, &req);
+        // First iteration releases ownership for read; later iterations run directly (owner is None).
+        let resp = if i == 0 {
+            send_and_recv_with_release(&mut h, loop0, &req)
+        } else {
+            send_and_recv(&mut h, &req)
+        };
         h.process(0);
         assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "iteration {i}");
 

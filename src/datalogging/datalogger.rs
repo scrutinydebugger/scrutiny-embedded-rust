@@ -638,11 +638,13 @@ pub(crate) fn fetch_variable_bitfield(
         }
     } as UintBiggest;
 
-    let mask: UintBiggest = if bitsize >= 64 {
-        UintBiggest::MAX
+    // Mask computed in u64 so that bitsize == 32 cannot overflow when UintBiggest is u32.
+    let mask_u64: u64 = if bitsize >= 64 {
+        u64::MAX
     } else {
-        (1u64 << bitsize) as UintBiggest - 1
+        (1u64 << bitsize) - 1
     };
+    let mask = mask_u64 as UintBiggest;
     let masked = shifted & mask;
 
     // Write the masked value into `out.val` with the correct output type, then sign-extend if sint.

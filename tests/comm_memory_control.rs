@@ -1,7 +1,7 @@
 use scrutiny_embedded_rust::config::Config;
 use scrutiny_embedded_rust::main_handler::MainHandler;
 use scrutiny_embedded_rust::protocol::{
-    CommandId, CommControlSubfn, MemoryControlSubfn, ResponseCode, CONNECT_MAGIC, MINIMUM_RX_BUFFER_SIZE,
+    CommControlSubfn, CommandId, MemoryControlSubfn, ResponseCode, CONNECT_MAGIC, MINIMUM_RX_BUFFER_SIZE,
     MINIMUM_TX_BUFFER_SIZE,
 };
 use scrutiny_embedded_rust::tools::crc32;
@@ -44,7 +44,11 @@ fn send_and_recv(h: &mut MainHandler<'_, '_>, req: &[u8]) -> Vec<u8> {
 }
 
 fn connect(h: &mut MainHandler<'_, '_>) {
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &CONNECT_MAGIC);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &CONNECT_MAGIC,
+    );
     h.receive_data(&req);
     h.process(0);
     let n = h.data_to_send() as usize;
@@ -266,13 +270,18 @@ fn test_read_length_exceeds_protocol_max() {
 fn test_read_forbidden_address() {
     // A 16-byte buffer; bytes [6..10) are forbidden.
     // A 4-byte sliding window must be rejected whenever it overlaps the forbidden region.
-    let buf: [u8; 16] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+    let buf: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    ];
     let forbidden_start = unsafe { buf.as_ptr().add(6) };
     let forbidden_end = unsafe { buf.as_ptr().add(9) }; // inclusive end
 
     static FORBIDDEN: std::sync::OnceLock<[AddressRange; 1]> = std::sync::OnceLock::new();
     let ranges = FORBIDDEN.get_or_init(|| {
-        [AddressRange { start: forbidden_start, end: forbidden_end }]
+        [AddressRange {
+            start: forbidden_start,
+            end: forbidden_end,
+        }]
     });
 
     let mut rx = [0u8; 128];
@@ -293,7 +302,11 @@ fn test_read_forbidden_address() {
 
         // Window [i, i+4) overlaps [6,10) if i < 10 AND i+4 > 6 → i in [3..9] inclusive
         let overlaps = i < 10 && i + (window as usize) > 6;
-        let expected = if overlaps { ResponseCode::Forbidden as u8 } else { ResponseCode::Ok as u8 };
+        let expected = if overlaps {
+            ResponseCode::Forbidden as u8
+        } else {
+            ResponseCode::Ok as u8
+        };
         assert_eq!(resp_code(&resp), expected, "i={i}");
     }
 }
@@ -308,7 +321,10 @@ fn test_read_forbidden_containment() {
 
     static FORBIDDEN: std::sync::OnceLock<[AddressRange; 1]> = std::sync::OnceLock::new();
     let ranges = FORBIDDEN.get_or_init(|| {
-        [AddressRange { start: forbidden_start, end: forbidden_end }]
+        [AddressRange {
+            start: forbidden_start,
+            end: forbidden_end,
+        }]
     });
 
     let mut rx = [0u8; 128];
@@ -331,13 +347,18 @@ fn test_read_forbidden_containment() {
 #[test]
 fn test_read_readonly_address_allowed() {
     // Readonly regions must NOT block reads — only writes.
-    let buf: [u8; 16] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+    let buf: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    ];
     let ro_start = unsafe { buf.as_ptr().add(6) };
     let ro_end = unsafe { buf.as_ptr().add(9) };
 
     static READONLY: std::sync::OnceLock<[AddressRange; 1]> = std::sync::OnceLock::new();
     let ranges = READONLY.get_or_init(|| {
-        [AddressRange { start: ro_start, end: ro_end }]
+        [AddressRange {
+            start: ro_start,
+            end: ro_end,
+        }]
     });
 
     let mut rx = [0u8; 128];
@@ -355,7 +376,11 @@ fn test_read_readonly_address_allowed() {
         let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Read as u8, &payload);
         let resp = send_and_recv(&mut h, &req);
         h.process(0);
-        assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "read of readonly region should succeed at i={i}");
+        assert_eq!(
+            resp_code(&resp),
+            ResponseCode::Ok as u8,
+            "read of readonly region should succeed at i={i}"
+        );
     }
 }
 
@@ -374,7 +399,11 @@ fn test_write_single_block() {
     let data_to_write = [0x11u8, 0x22, 0x33, 0x44];
 
     let payload = write_block(buf.as_mut_ptr() as *const u8, &data_to_write);
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Write as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::Write as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp[0], CommandId::MemoryControl as u8 | 0x80);
@@ -385,7 +414,10 @@ fn test_write_single_block() {
     let p = resp_payload(&resp);
     assert_eq!(p.len(), ADDR_SIZE + 2);
     assert_eq!(&p[..ADDR_SIZE], &encode_addr(buf.as_ptr()));
-    assert_eq!(u16::from_be_bytes([p[ADDR_SIZE], p[ADDR_SIZE + 1]]), data_to_write.len() as u16);
+    assert_eq!(
+        u16::from_be_bytes([p[ADDR_SIZE], p[ADDR_SIZE + 1]]),
+        data_to_write.len() as u16
+    );
 
     // Verify the buffer was updated.
     assert_eq!(&buf[..4], &data_to_write);
@@ -409,7 +441,11 @@ fn test_write_multiple_blocks() {
     payload.extend(write_block(buf.as_mut_ptr() as *const u8, &data1));
     payload.extend(write_block(unsafe { buf.as_mut_ptr().add(3) } as *const u8, &data2));
 
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Write as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::Write as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -435,7 +471,11 @@ fn test_write_disabled() {
 
     let mut buf = [0xFFu8; 4];
     let payload = write_block(buf.as_mut_ptr() as *const u8, &[0x00, 0x00, 0x00, 0x00]);
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Write as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::Write as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp_code(&resp), ResponseCode::Forbidden as u8);
@@ -458,9 +498,15 @@ fn test_write_invalid_data_length() {
     let mut payload = encode_addr(buf.as_ptr());
     payload.push(0x00);
     payload.push(10); // claims 10 bytes
-    for _ in 0..9 { payload.push(0x00); } // only 9 bytes of data
+    for _ in 0..9 {
+        payload.push(0x00);
+    } // only 9 bytes of data
 
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Write as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::Write as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
 }
@@ -493,7 +539,11 @@ fn test_write_invalid_request_bad_length() {
         // Pad or truncate the payload.
         let mut payload = full_payload.clone();
         payload.resize(bad_len, 0x00);
-        let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Write as u8, &payload);
+        let req = make_request(
+            CommandId::MemoryControl as u8,
+            MemoryControlSubfn::Write as u8,
+            &payload,
+        );
         let resp = send_and_recv(&mut h, &req);
         h.process(0);
         assert_eq!(
@@ -507,13 +557,18 @@ fn test_write_invalid_request_bad_length() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_write_forbidden_address() {
-    let buf: [u8; 16] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+    let buf: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    ];
     let forbidden_start = unsafe { buf.as_ptr().add(6) };
     let forbidden_end = unsafe { buf.as_ptr().add(9) };
 
     static FORBIDDEN: std::sync::OnceLock<[AddressRange; 1]> = std::sync::OnceLock::new();
     let ranges = FORBIDDEN.get_or_init(|| {
-        [AddressRange { start: forbidden_start, end: forbidden_end }]
+        [AddressRange {
+            start: forbidden_start,
+            end: forbidden_end,
+        }]
     });
 
     let mut rx = [0u8; 128];
@@ -531,12 +586,20 @@ fn test_write_forbidden_address() {
     for i in 0..(buf.len() - window) {
         let write_ptr = unsafe { buf.as_ptr().add(i) };
         let payload = write_block(write_ptr as *const u8, &write_data);
-        let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Write as u8, &payload);
+        let req = make_request(
+            CommandId::MemoryControl as u8,
+            MemoryControlSubfn::Write as u8,
+            &payload,
+        );
         let resp = send_and_recv(&mut h, &req);
         h.process(0);
 
         let overlaps = i < 10 && i + window > 6;
-        let expected = if overlaps { ResponseCode::Forbidden as u8 } else { ResponseCode::Ok as u8 };
+        let expected = if overlaps {
+            ResponseCode::Forbidden as u8
+        } else {
+            ResponseCode::Ok as u8
+        };
         assert_eq!(resp_code(&resp), expected, "i={i}");
 
         if !overlaps {
@@ -555,7 +618,10 @@ fn test_write_readonly_address() {
 
     static READONLY: std::sync::OnceLock<[AddressRange; 1]> = std::sync::OnceLock::new();
     let ranges = READONLY.get_or_init(|| {
-        [AddressRange { start: ro_start, end: ro_end }]
+        [AddressRange {
+            start: ro_start,
+            end: ro_end,
+        }]
     });
 
     let mut rx = [0u8; 128];
@@ -572,12 +638,20 @@ fn test_write_readonly_address() {
     for i in 0..(buf.len() - window) {
         let write_ptr = unsafe { buf.as_ptr().add(i) };
         let payload = write_block(write_ptr as *const u8, &write_data);
-        let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Write as u8, &payload);
+        let req = make_request(
+            CommandId::MemoryControl as u8,
+            MemoryControlSubfn::Write as u8,
+            &payload,
+        );
         let resp = send_and_recv(&mut h, &req);
         h.process(0);
 
         let overlaps = i < 10 && i + window > 6;
-        let expected = if overlaps { ResponseCode::Forbidden as u8 } else { ResponseCode::Ok as u8 };
+        let expected = if overlaps {
+            ResponseCode::Forbidden as u8
+        } else {
+            ResponseCode::Ok as u8
+        };
         assert_eq!(resp_code(&resp), expected, "i={i}");
     }
 }
@@ -592,7 +666,10 @@ fn test_write_readonly_containment() {
 
     static READONLY: std::sync::OnceLock<[AddressRange; 1]> = std::sync::OnceLock::new();
     let ranges = READONLY.get_or_init(|| {
-        [AddressRange { start: ro_start, end: ro_end }]
+        [AddressRange {
+            start: ro_start,
+            end: ro_end,
+        }]
     });
 
     let mut rx = [0u8; 128];
@@ -606,7 +683,11 @@ fn test_write_readonly_containment() {
     // Write from 1 byte before the readonly through 1 byte after → 6 bytes.
     let write_ptr = unsafe { buf.as_ptr().add(5) };
     let payload = write_block(write_ptr as *const u8, &[0xFFu8; 6]);
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Write as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::Write as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::Forbidden as u8);
 }
@@ -638,7 +719,11 @@ fn test_write_masked_single_block() {
     let expected = [0xFAu8, 0xAA, 0x0A, 0x00, 0x05, 0xFF];
 
     let payload = masked_write_block(buf.as_mut_ptr() as *const u8, &data, &mask);
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteMasked as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteMasked as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp[0], CommandId::MemoryControl as u8 | 0x80);
@@ -686,9 +771,17 @@ fn test_write_masked_multiple_blocks() {
 
     let mut payload = Vec::new();
     payload.extend(masked_write_block(buf.as_mut_ptr() as *const u8, &data1, &mask1));
-    payload.extend(masked_write_block(unsafe { buf.as_mut_ptr().add(6) } as *const u8, &data2, &mask2));
+    payload.extend(masked_write_block(
+        unsafe { buf.as_mut_ptr().add(6) } as *const u8,
+        &data2,
+        &mask2,
+    ));
 
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteMasked as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteMasked as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -713,7 +806,11 @@ fn test_write_masked_disabled() {
 
     let mut buf = [0xFFu8; 4];
     let payload = masked_write_block(buf.as_mut_ptr() as *const u8, &[0x00; 4], &[0xFF; 4]);
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteMasked as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteMasked as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp_code(&resp), ResponseCode::Forbidden as u8);
@@ -735,9 +832,15 @@ fn test_write_masked_invalid_data_length() {
     let mut payload = encode_addr(buf.as_ptr());
     payload.push(0x00);
     payload.push(4); // length = 4
-    for _ in 0..4 { payload.push(0x00); } // only data, no mask
+    for _ in 0..4 {
+        payload.push(0x00);
+    } // only data, no mask
 
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteMasked as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteMasked as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
 }
@@ -751,7 +854,10 @@ fn test_write_masked_forbidden_address() {
 
     static FORBIDDEN: std::sync::OnceLock<[AddressRange; 1]> = std::sync::OnceLock::new();
     let ranges = FORBIDDEN.get_or_init(|| {
-        [AddressRange { start: forbidden_start, end: forbidden_end }]
+        [AddressRange {
+            start: forbidden_start,
+            end: forbidden_end,
+        }]
     });
 
     let mut rx = [0u8; 128];
@@ -769,12 +875,20 @@ fn test_write_masked_forbidden_address() {
     for i in 0..(buf.len() - window) {
         let write_ptr = unsafe { buf.as_ptr().add(i) };
         let payload = masked_write_block(write_ptr as *const u8, &write_data, &mask);
-        let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteMasked as u8, &payload);
+        let req = make_request(
+            CommandId::MemoryControl as u8,
+            MemoryControlSubfn::WriteMasked as u8,
+            &payload,
+        );
         let resp = send_and_recv(&mut h, &req);
         h.process(0);
 
         let overlaps = i < 10 && i + window > 6;
-        let expected = if overlaps { ResponseCode::Forbidden as u8 } else { ResponseCode::Ok as u8 };
+        let expected = if overlaps {
+            ResponseCode::Forbidden as u8
+        } else {
+            ResponseCode::Ok as u8
+        };
         assert_eq!(resp_code(&resp), expected, "i={i}");
     }
 }
@@ -783,8 +897,14 @@ fn test_write_masked_forbidden_address() {
 
 fn rpv_read_cb(rpv: RuntimePublishedValue, out: &mut AnyType, _caller: Option<&'static str>) -> bool {
     match rpv.id {
-        0x1122 => { out.uint32 = 0x12345678; true }
-        0x3344 => { out.uint16 = 0xABCD; true }
+        0x1122 => {
+            out.uint32 = 0x12345678;
+            true
+        }
+        0x3344 => {
+            out.uint16 = 0xABCD;
+            true
+        }
         _ => false,
     }
 }
@@ -801,8 +921,14 @@ fn rpv_write_cb_fail(_rpv: RuntimePublishedValue, _val: &AnyType) -> bool {
 }
 
 static TEST_RPVS: [RuntimePublishedValue; 2] = [
-    RuntimePublishedValue { id: 0x1122, var_type: VariableType::Uint32 },
-    RuntimePublishedValue { id: 0x3344, var_type: VariableType::Uint16 },
+    RuntimePublishedValue {
+        id: 0x1122,
+        var_type: VariableType::Uint32,
+    },
+    RuntimePublishedValue {
+        id: 0x3344,
+        var_type: VariableType::Uint16,
+    },
 ];
 
 #[test]
@@ -817,7 +943,11 @@ fn test_read_rpv_single() {
 
     // Request: read RPV id=0x1122 (Uint32, value 0x12345678)
     let payload = [0x11u8, 0x22];
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::ReadRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp[0], CommandId::MemoryControl as u8 | 0x80);
@@ -843,7 +973,11 @@ fn test_read_rpv_multiple() {
 
     // Request both RPVs in one go.
     let payload = [0x11u8, 0x22, 0x33, 0x44];
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::ReadRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -867,7 +1001,11 @@ fn test_read_rpv_no_callback() {
     connect(&mut h);
 
     let payload = [0x11u8, 0x22];
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::ReadRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8);
 }
@@ -884,7 +1022,11 @@ fn test_read_rpv_invalid_odd_length() {
 
     // Odd number of bytes → cannot be a list of 2-byte IDs.
     let payload = [0x11u8, 0x22, 0x33]; // 3 bytes
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::ReadRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
 }
@@ -901,7 +1043,11 @@ fn test_read_rpv_unknown_id() {
 
     // ID 0xDEAD is not in TEST_RPVS.
     let payload = [0xDEu8, 0xAD];
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::ReadRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
 }
@@ -934,7 +1080,11 @@ fn test_read_rpv_empty_rpv_list() {
     connect(&mut h);
 
     let payload = [0x11u8, 0x22];
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::ReadRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8);
 }
@@ -960,19 +1110,49 @@ fn rpv_read_each_type_cb(rpv: RuntimePublishedValue, out: &mut AnyType, _caller:
 }
 
 static EACH_TYPE_READ_RPVS: &[RuntimePublishedValue] = &[
-    RuntimePublishedValue { id: 0x9000, var_type: VariableType::Uint8 },
-    RuntimePublishedValue { id: 0x9004, var_type: VariableType::Sint8 },
-    RuntimePublishedValue { id: 0x9001, var_type: VariableType::Uint16 },
-    RuntimePublishedValue { id: 0x9002, var_type: VariableType::Uint32 },
-    RuntimePublishedValue { id: 0x9005, var_type: VariableType::Sint16 },
-    RuntimePublishedValue { id: 0x9006, var_type: VariableType::Sint32 },
-    RuntimePublishedValue { id: 0x9008, var_type: VariableType::Float32 },
+    RuntimePublishedValue {
+        id: 0x9000,
+        var_type: VariableType::Uint8,
+    },
+    RuntimePublishedValue {
+        id: 0x9004,
+        var_type: VariableType::Sint8,
+    },
+    RuntimePublishedValue {
+        id: 0x9001,
+        var_type: VariableType::Uint16,
+    },
+    RuntimePublishedValue {
+        id: 0x9002,
+        var_type: VariableType::Uint32,
+    },
+    RuntimePublishedValue {
+        id: 0x9005,
+        var_type: VariableType::Sint16,
+    },
+    RuntimePublishedValue {
+        id: 0x9006,
+        var_type: VariableType::Sint32,
+    },
+    RuntimePublishedValue {
+        id: 0x9008,
+        var_type: VariableType::Float32,
+    },
     #[cfg(feature = "support_64bits")]
-    RuntimePublishedValue { id: 0x9003, var_type: VariableType::Uint64 },
+    RuntimePublishedValue {
+        id: 0x9003,
+        var_type: VariableType::Uint64,
+    },
     #[cfg(feature = "support_64bits")]
-    RuntimePublishedValue { id: 0x9007, var_type: VariableType::Sint64 },
+    RuntimePublishedValue {
+        id: 0x9007,
+        var_type: VariableType::Sint64,
+    },
     #[cfg(feature = "support_64bits")]
-    RuntimePublishedValue { id: 0x9009, var_type: VariableType::Float64 },
+    RuntimePublishedValue {
+        id: 0x9009,
+        var_type: VariableType::Float64,
+    },
 ];
 
 #[test]
@@ -1006,7 +1186,11 @@ fn test_read_multiple_rpv_each_type() {
     for (id, _) in &expected {
         payload.extend_from_slice(&id.to_be_bytes());
     }
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::ReadRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
 
@@ -1036,7 +1220,11 @@ fn test_read_rpv_response_overflow() {
     for _ in 0..nb_rpv {
         payload.extend_from_slice(&[0x11, 0x22]);
     }
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::ReadRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::ReadRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp[0], CommandId::MemoryControl as u8 | 0x80);
     assert_eq!(resp[1], MemoryControlSubfn::ReadRpv as u8);
@@ -1060,7 +1248,11 @@ fn test_write_rpv_single() {
     let mut payload = vec![0x11u8, 0x22];
     payload.extend_from_slice(&0xDEADBEEFu32.to_be_bytes());
 
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp[0], CommandId::MemoryControl as u8 | 0x80);
@@ -1092,7 +1284,11 @@ fn test_write_rpv_multiple() {
     payload.extend_from_slice(&[0x33u8, 0x44]);
     payload.extend_from_slice(&0xABCDu16.to_be_bytes());
 
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -1117,7 +1313,11 @@ fn test_write_rpv_no_callback() {
 
     let mut payload = vec![0x11u8, 0x22];
     payload.extend_from_slice(&0u32.to_be_bytes());
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8);
 }
@@ -1135,7 +1335,11 @@ fn test_write_rpv_unknown_id() {
     // ID 0xDEAD is not registered — parsing cannot continue (unknown size).
     let mut payload = vec![0xDEu8, 0xAD];
     payload.extend_from_slice(&0u32.to_be_bytes()); // some value
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
 }
@@ -1153,7 +1357,11 @@ fn test_write_rpv_truncated_value() {
 
     // 0x1122 is Uint32 (4 bytes) but we only send 2 bytes of value.
     let payload = [0x11u8, 0x22, 0xDE, 0xAD]; // only 2 value bytes instead of 4
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
 }
@@ -1171,7 +1379,11 @@ fn test_write_rpv_callback_failure() {
 
     let mut payload = vec![0x11u8, 0x22];
     payload.extend_from_slice(&0u32.to_be_bytes());
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
 }
@@ -1205,7 +1417,11 @@ fn test_write_rpv_empty_rpv_list() {
 
     let mut payload = vec![0x11u8, 0x22];
     payload.extend_from_slice(&0u32.to_be_bytes());
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8);
 }
@@ -1255,22 +1471,55 @@ fn rpv_write_all_types_cb(rpv: RuntimePublishedValue, val: &AnyType) -> bool {
 }
 
 static ALL_TYPE_WRITE_RPVS: &[RuntimePublishedValue] = &[
-    RuntimePublishedValue { id: 0x1000, var_type: VariableType::Uint8 },
-    RuntimePublishedValue { id: 0x1004, var_type: VariableType::Sint8 },
-    RuntimePublishedValue { id: 0x1001, var_type: VariableType::Uint16 },
-    RuntimePublishedValue { id: 0x1002, var_type: VariableType::Uint32 },
-    RuntimePublishedValue { id: 0x1005, var_type: VariableType::Sint16 },
-    RuntimePublishedValue { id: 0x1006, var_type: VariableType::Sint32 },
-    RuntimePublishedValue { id: 0x1008, var_type: VariableType::Float32 },
+    RuntimePublishedValue {
+        id: 0x1000,
+        var_type: VariableType::Uint8,
+    },
+    RuntimePublishedValue {
+        id: 0x1004,
+        var_type: VariableType::Sint8,
+    },
+    RuntimePublishedValue {
+        id: 0x1001,
+        var_type: VariableType::Uint16,
+    },
+    RuntimePublishedValue {
+        id: 0x1002,
+        var_type: VariableType::Uint32,
+    },
+    RuntimePublishedValue {
+        id: 0x1005,
+        var_type: VariableType::Sint16,
+    },
+    RuntimePublishedValue {
+        id: 0x1006,
+        var_type: VariableType::Sint32,
+    },
+    RuntimePublishedValue {
+        id: 0x1008,
+        var_type: VariableType::Float32,
+    },
     #[cfg(feature = "support_64bits")]
-    RuntimePublishedValue { id: 0x1003, var_type: VariableType::Uint64 },
+    RuntimePublishedValue {
+        id: 0x1003,
+        var_type: VariableType::Uint64,
+    },
     #[cfg(feature = "support_64bits")]
-    RuntimePublishedValue { id: 0x1007, var_type: VariableType::Sint64 },
+    RuntimePublishedValue {
+        id: 0x1007,
+        var_type: VariableType::Sint64,
+    },
     #[cfg(feature = "support_64bits")]
-    RuntimePublishedValue { id: 0x1009, var_type: VariableType::Float64 },
+    RuntimePublishedValue {
+        id: 0x1009,
+        var_type: VariableType::Float64,
+    },
 ];
 
-static WRITE_U16_RPV: [RuntimePublishedValue; 1] = [RuntimePublishedValue { id: 0x1001, var_type: VariableType::Uint16 }];
+static WRITE_U16_RPV: [RuntimePublishedValue; 1] = [RuntimePublishedValue {
+    id: 0x1001,
+    var_type: VariableType::Uint16,
+}];
 
 #[test]
 fn test_write_rpv_all_types() {
@@ -1309,7 +1558,11 @@ fn test_write_rpv_all_types() {
         expected_payload.push(value.len() as u8);
     }
 
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
     assert_eq!(resp_payload(&resp), expected_payload.as_slice());
@@ -1354,7 +1607,11 @@ fn test_write_rpv_response_overflow() {
     for _ in 0..NB_WRITE {
         payload.extend_from_slice(&[0x10, 0x01, 0xAA, 0xBB]);
     }
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp.len(), 9);
     assert_eq!(resp[0], CommandId::MemoryControl as u8 | 0x80);
@@ -1387,7 +1644,11 @@ fn test_write_rpv_response_full_no_overflow() {
         payload.extend_from_slice(&[0x10, 0x01, 0xAA, 0xBB]);
         expected_payload.extend_from_slice(&[0x10, 0x01, 2]);
     }
-    let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::WriteRpv as u8, &payload);
+    let req = make_request(
+        CommandId::MemoryControl as u8,
+        MemoryControlSubfn::WriteRpv as u8,
+        &payload,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp.len(), TX_DATA_SIZE + 9);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);

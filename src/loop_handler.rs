@@ -7,7 +7,7 @@ use crate::config::RpvReadCallback;
 #[cfg(feature = "datalogging")]
 use crate::datalogging::{DataLoggerCell, DataloggerHost, State};
 #[cfg(feature = "datalogging")]
-use crate::ipc::{IpcMessage, Loop2MainMsg, Loop2MainMsgKind, Main2LoopMsg, LoopIpcFlag};
+use crate::ipc::{IpcMessage, Loop2MainMsg, Loop2MainMsgKind, LoopIpcFlag, Main2LoopMsg};
 #[cfg(feature = "datalogging")]
 use crate::types::{AnyType, RuntimePublishedValue};
 #[cfg(feature = "datalogging")]
@@ -26,29 +26,29 @@ pub enum LoopType {
 #[cfg(feature = "datalogging")]
 /// Per-loop datalogging runtime state, accessed only from the loop task.
 struct LoopDlRuntime {
-    owns:           bool,
-    data_acquired:  bool,
+    owns: bool,
+    data_acquired: bool,
     /// Address of the `DataLoggerCell` received via `TakeOwnership` IPC; null when not owned.
-    cell:           *const DataLoggerCell,
-    rpvs:        Option<&'static [RuntimePublishedValue]>,
+    cell: *const DataLoggerCell,
+    rpvs: Option<&'static [RuntimePublishedValue]>,
     rpv_read_cb: Option<RpvReadCallback>,
 }
 
 #[cfg(feature = "datalogging")]
 impl LoopDlRuntime {
     const DEFAULT: Self = Self {
-        owns:         false,
+        owns: false,
         data_acquired: false,
-        cell:         ptr::null(),
-        rpvs:         None,
-        rpv_read_cb:  None,
+        cell: ptr::null(),
+        rpvs: None,
+        rpv_read_cb: None,
     };
 }
 
 #[cfg(feature = "datalogging")]
 /// Private host implementation built from `LoopDlRuntime` fields.
 struct LoopHost {
-    rpvs:        Option<&'static [RuntimePublishedValue]>,
+    rpvs: Option<&'static [RuntimePublishedValue]>,
     rpv_read_cb: Option<RpvReadCallback>,
     caller_name: &'static str,
 }
@@ -76,7 +76,9 @@ impl DataloggerHost for LoopHost {
         self.rpv_read_cb.is_some_and(|cb| cb(rpv, out, Some(self.caller_name)))
     }
 
-    fn caller_name(&self) -> Option<&'static str> { Some(self.caller_name) }
+    fn caller_name(&self) -> Option<&'static str> {
+        Some(self.caller_name)
+    }
 }
 
 /// Loop core shared by `FixedFreqLoopHandler` and `VariableFreqLoopHandler`.
@@ -119,7 +121,11 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_loop(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None }),
+            main2loop: IpcMessage::new_loop(Main2LoopMsg::TakeOwnership {
+                cell_addr: 0,
+                rpvs: None,
+                rpv_read_cb: None,
+            }),
             #[cfg(feature = "datalogging")]
             loop2main: IpcMessage::new_loop(Loop2MainMsg::DEFAULT),
         }
@@ -138,7 +144,11 @@ impl LoopHandler {
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
             #[cfg(feature = "datalogging")]
-            main2loop: IpcMessage::new_loop(Main2LoopMsg::TakeOwnership { cell_addr: 0, rpvs: None, rpv_read_cb: None }),
+            main2loop: IpcMessage::new_loop(Main2LoopMsg::TakeOwnership {
+                cell_addr: 0,
+                rpvs: None,
+                rpv_read_cb: None,
+            }),
             #[cfg(feature = "datalogging")]
             loop2main: IpcMessage::new_loop(Loop2MainMsg::DEFAULT),
         }
@@ -222,7 +232,9 @@ impl LoopHandler {
     /// Handles datalogging IPC messages and drives the owned datalogger.
     #[cfg(feature = "datalogging")]
     fn process_datalogging(&self, timebase: &Timebase) {
-        if !self.datalogging_allowed { return; }
+        if !self.datalogging_allowed {
+            return;
+        }
 
         // SAFETY: only this loop task writes `dl_runtime`.
         let runtime = unsafe { &mut *self.dl_runtime.get() };
@@ -231,7 +243,11 @@ impl LoopHandler {
         if self.main2loop.has_content() && !self.loop2main.has_content() {
             if let Some(msg) = self.main2loop.pop() {
                 match msg {
-                    Main2LoopMsg::TakeOwnership { cell_addr, rpvs, rpv_read_cb } => {
+                    Main2LoopMsg::TakeOwnership {
+                        cell_addr,
+                        rpvs,
+                        rpv_read_cb,
+                    } => {
                         runtime.cell = cell_addr as *const DataLoggerCell;
                         runtime.owns = true;
                         runtime.data_acquired = false;
@@ -290,7 +306,10 @@ impl LoopHandler {
                 } else {
                     let state = dl.get_state();
                     let (bytes_to_complete, write_counter) = if state == State::Triggered {
-                        (dl.get_bytes_to_acquire_from_trigger_to_completion(), dl.data_counter_since_trigger())
+                        (
+                            dl.get_bytes_to_acquire_from_trigger_to_completion(),
+                            dl.data_counter_since_trigger(),
+                        )
                     } else {
                         (0, 0)
                     };

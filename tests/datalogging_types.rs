@@ -2,12 +2,9 @@
 
 use scrutiny_embedded_rust::datalogging::{convert_to_compare_type, AnyValAndTypePair};
 use scrutiny_embedded_rust::tools::{
-    read_biggest_float, read_biggest_sint, read_biggest_uint, set_biggest_float, set_biggest_sint,
-    set_biggest_uint,
+    read_biggest_float, read_biggest_sint, read_biggest_uint, set_biggest_float, set_biggest_sint, set_biggest_uint,
 };
-use scrutiny_embedded_rust::types::{
-    AnyType, VariableType, BIGGEST_FLOAT, BIGGEST_SINT, BIGGEST_UINT,
-};
+use scrutiny_embedded_rust::types::{AnyType, VariableType, BIGGEST_FLOAT, BIGGEST_SINT, BIGGEST_UINT};
 
 #[test]
 fn convert_to_compare_type_sint16() {
@@ -91,7 +88,9 @@ fn convert_to_compare_type_uint64() {
 #[test]
 fn convert_to_compare_type_sint64() {
     let mut pair = AnyValAndTypePair {
-        val: AnyType { sint64: -0x123456789ABC },
+        val: AnyType {
+            sint64: -0x123456789ABC,
+        },
         valtype: VariableType::Sint64,
     };
     convert_to_compare_type(&mut pair);
@@ -119,7 +118,10 @@ fn any_type_compare_cast() {
     unsafe { core::ptr::write_bytes(&raw mut v, 55, 1) };
 
     v.float32 = 3.141_592_6_f32;
-    let mut pair = AnyValAndTypePair { val: v, valtype: VariableType::Float32 };
+    let mut pair = AnyValAndTypePair {
+        val: v,
+        valtype: VariableType::Float32,
+    };
     convert_to_compare_type(&mut pair);
     assert_eq!(pair.valtype, VariableType::Float32);
     assert_eq!(unsafe { pair.val.float32 }, 3.141_592_6_f32);
@@ -140,20 +142,29 @@ fn any_type_compare_cast() {
     }
 
     set_biggest_sint(&mut v, -10_000_000);
-    let mut pair = AnyValAndTypePair { val: v, valtype: BIGGEST_SINT };
+    let mut pair = AnyValAndTypePair {
+        val: v,
+        valtype: BIGGEST_SINT,
+    };
     convert_to_compare_type(&mut pair);
     assert_eq!(pair.valtype, BIGGEST_SINT);
     assert_eq!(read_biggest_sint(&pair.val), -10_000_000);
 
     set_biggest_uint(&mut v, 1_000_000);
-    let mut pair = AnyValAndTypePair { val: v, valtype: BIGGEST_UINT };
+    let mut pair = AnyValAndTypePair {
+        val: v,
+        valtype: BIGGEST_UINT,
+    };
     convert_to_compare_type(&mut pair);
     assert_eq!(pair.valtype, BIGGEST_UINT);
     assert_eq!(read_biggest_uint(&pair.val), 1_000_000);
 
     set_biggest_float(&mut v, 1.234_5);
     assert_eq!(read_biggest_float(&v), 1.234_5);
-    let mut pair = AnyValAndTypePair { val: v, valtype: BIGGEST_FLOAT };
+    let mut pair = AnyValAndTypePair {
+        val: v,
+        valtype: BIGGEST_FLOAT,
+    };
     convert_to_compare_type(&mut pair);
     assert_eq!(pair.valtype, VariableType::Float32);
     assert_eq!(unsafe { pair.val.float32 }, 1.234_5_f32);

@@ -16,7 +16,12 @@ struct Payload {
 }
 
 fn make_payload(value: u32) -> Payload {
-    Payload { a: value, b: !value, c: value.wrapping_mul(3), d: value ^ 0xA5A5_A5A5 }
+    Payload {
+        a: value,
+        b: !value,
+        c: value.wrapping_mul(3),
+        d: value ^ 0xA5A5_A5A5,
+    }
 }
 
 struct SideResult {
@@ -55,7 +60,10 @@ fn exchange(
         }
     }
 
-    SideResult { error_at_iter, sent_count: my_value }
+    SideResult {
+        error_at_iter,
+        sent_count: my_value,
+    }
 }
 
 // Mirrors C++ TestIPC.CheckWithThread: two threads exchange sequential values in both directions.

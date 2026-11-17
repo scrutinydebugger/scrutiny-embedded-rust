@@ -37,7 +37,11 @@ fn send_and_recv(h: &mut MainHandler<'_, '_>, req: &[u8]) -> Vec<u8> {
 }
 
 fn connect(h: &mut MainHandler<'_, '_>) -> u32 {
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &CONNECT_MAGIC);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &CONNECT_MAGIC,
+    );
     h.receive_data(&req);
     h.process(0);
     let n = h.data_to_send() as usize;

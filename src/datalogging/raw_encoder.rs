@@ -46,11 +46,7 @@ impl RawFormatEncoder {
 
     /// Recomputes geometry from `config` and resets all counters.
     /// `host` is used to look up RPV sizes.
-    pub(crate) fn reset(
-        &mut self,
-        config: &Configuration,
-        host: &dyn super::datalogger::DataloggerHost,
-    ) {
+    pub(crate) fn reset(&mut self, config: &Configuration, host: &dyn super::datalogger::DataloggerHost) {
         self.reset_write_counter();
         self.error = false;
         self.next_entry_write_index = 0;
@@ -142,7 +138,8 @@ impl RawFormatEncoder {
                         val = AnyType { uint32: 0 };
                     }
                     // Safety: buffer valid; remaining capacity validated in reset().
-                    let dst = unsafe { core::slice::from_raw_parts_mut(self.buffer.add(cursor), self.buffer_len - cursor) };
+                    let dst =
+                        unsafe { core::slice::from_raw_parts_mut(self.buffer.add(cursor), self.buffer_len - cursor) };
                     let written = encode_anytype_be(val, rpv.var_type, dst);
                     cursor += written;
                 }
@@ -184,7 +181,11 @@ impl RawFormatEncoder {
     #[must_use]
     #[inline]
     pub const fn get_entry_count(&self) -> usize {
-        if self.full { self.max_entries } else { self.next_entry_write_index }
+        if self.full {
+            self.max_entries
+        } else {
+            self.next_entry_write_index
+        }
     }
 
     /// Total bytes occupied by valid entries.
@@ -340,7 +341,6 @@ impl RawFormatEncoder {
 
 // ── Big-endian encoding helper ────────────────────────────────────────────────
 
-
 /// Encodes `val` of `var_type` as big-endian bytes into `dst`.
 /// Returns the number of bytes written (= `var_type.type_size()`).
 fn encode_anytype_be(val: AnyType, var_type: VariableType, dst: &mut [u8]) -> usize {
@@ -408,8 +408,10 @@ mod tests {
     use crate::timebase::Timebase;
     use crate::types::{AnyType, RuntimePublishedValue, VariableType};
 
-    static TEST_RPV: RuntimePublishedValue =
-        RuntimePublishedValue { id: 0x1234, var_type: VariableType::Uint32 };
+    static TEST_RPV: RuntimePublishedValue = RuntimePublishedValue {
+        id: 0x1234,
+        var_type: VariableType::Uint32,
+    };
 
     struct TestHost {
         rpv_ok: bool,
@@ -420,10 +422,18 @@ mod tests {
             core::ptr::copy_nonoverlapping(src, dst, count);
             true
         }
-        fn is_rpv_read_configured(&self) -> bool { true }
-        fn rpv_exists(&self, id: u16) -> bool { id == TEST_RPV.id }
+        fn is_rpv_read_configured(&self) -> bool {
+            true
+        }
+        fn rpv_exists(&self, id: u16) -> bool {
+            id == TEST_RPV.id
+        }
         fn get_rpv(&self, id: u16) -> Option<RuntimePublishedValue> {
-            if id == TEST_RPV.id { Some(TEST_RPV) } else { None }
+            if id == TEST_RPV.id {
+                Some(TEST_RPV)
+            } else {
+                None
+            }
         }
         fn read_rpv(&self, _rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
             if self.rpv_ok {
@@ -435,7 +445,9 @@ mod tests {
         }
     }
 
-    fn make_host(rpv_ok: bool) -> TestHost { TestHost { rpv_ok } }
+    fn make_host(rpv_ok: bool) -> TestHost {
+        TestHost { rpv_ok }
+    }
 
     #[allow(unused_assignments)]
     #[test]
@@ -488,15 +500,15 @@ mod tests {
         while !enc.reader_finished() {
             let n = enc.reader_read_chunk(&mut out[copied..copied + 10]);
             copied += n;
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
         }
         assert_eq!(copied, 36);
 
         // Verify each entry at byte offsets 0, 12, 24.
         for (i, (expected_f, expected_u, expected_ts)) in
-            [(1.0_f32, 0x1111u32, 0u32), (2.0, 0x2222, 100), (3.0, 0x3333, 200)]
-                .iter()
-                .enumerate()
+            [(1.0_f32, 0x1111u32, 0u32), (2.0, 0x2222, 100), (3.0, 0x3333, 200)].iter().enumerate()
         {
             let base = i * 12;
             let got_f = f32::from_ne_bytes(out[base..base + 4].try_into().unwrap());
@@ -535,8 +547,14 @@ mod tests {
 
         let mut cfg = Configuration::DEFAULT;
         cfg.items_count = 2;
-        cfg.items_to_log[0] = LoggableItem::Memory { address: (&raw const var1).cast(), size: 4 };
-        cfg.items_to_log[1] = LoggableItem::Memory { address: (&raw const var2).cast(), size: 4 };
+        cfg.items_to_log[0] = LoggableItem::Memory {
+            address: (&raw const var1).cast(),
+            size: 4,
+        };
+        cfg.items_to_log[1] = LoggableItem::Memory {
+            address: (&raw const var2).cast(),
+            size: 4,
+        };
 
         // Buffer holds only 4 bytes — not enough for one 8-byte entry.
         let mut small_buf = [0u8; 4];

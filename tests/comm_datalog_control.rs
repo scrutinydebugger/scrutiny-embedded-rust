@@ -6,7 +6,7 @@ use scrutiny_embedded_rust::datalogging::{State as DlState, MAX_OPERANDS};
 use scrutiny_embedded_rust::loop_handler::{FixedFreqLoopHandler, LoopHandler, VariableFreqLoopHandler};
 use scrutiny_embedded_rust::main_handler::MainHandler;
 use scrutiny_embedded_rust::protocol::{
-    CommandId, CommControlSubfn, DataLogControlSubfn, GetInfoSubfn, ResponseCode, CONNECT_MAGIC,
+    CommControlSubfn, CommandId, DataLogControlSubfn, GetInfoSubfn, ResponseCode, CONNECT_MAGIC,
 };
 use scrutiny_embedded_rust::tools::crc32;
 use scrutiny_embedded_rust::types::{AnyType, RuntimePublishedValue, VariableType};
@@ -20,8 +20,10 @@ const DATALOG_BUFFER_SIZE: usize = 128;
 static mut SOME_VAR_OPERAND1: f32 = 0.0;
 static mut SOME_VAR_LOGGED1: f32 = 0.0;
 
-static TEST_RPVS: [RuntimePublishedValue; 1] =
-    [RuntimePublishedValue { id: 0x8888, var_type: VariableType::Float32 }];
+static TEST_RPVS: [RuntimePublishedValue; 1] = [RuntimePublishedValue {
+    id: 0x8888,
+    var_type: VariableType::Float32,
+}];
 
 fn rpv_read_callback(rpv: RuntimePublishedValue, out: &mut AnyType, _caller: Option<&'static str>) -> bool {
     if rpv.id == 0x8888 && rpv.var_type == VariableType::Float32 {
@@ -55,7 +57,11 @@ fn send_and_recv(h: &mut MainHandler<'_, '_>, req: &[u8]) -> Vec<u8> {
 }
 
 fn connect(h: &mut MainHandler<'_, '_>) {
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &CONNECT_MAGIC);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &CONNECT_MAGIC,
+    );
     h.receive_data(&req);
     h.process(0);
     let n = h.data_to_send() as usize;
@@ -89,8 +95,16 @@ struct DlConfig {
 
 enum DlOperand {
     Literal(f32),
-    Var { addr: usize, datatype: u8 },
-    VarBit { addr: usize, datatype: u8, bitoffset: u8, bitsize: u8 },
+    Var {
+        addr: usize,
+        datatype: u8,
+    },
+    VarBit {
+        addr: usize,
+        datatype: u8,
+        bitoffset: u8,
+        bitsize: u8,
+    },
     Rpv(u16),
 }
 
@@ -126,7 +140,12 @@ fn encode_configure_payload(cfg: &DlConfig) -> Vec<u8> {
                 buf.push(*datatype);
                 buf.extend_from_slice(&encode_usize_be(*addr));
             }
-            DlOperand::VarBit { addr, datatype, bitoffset, bitsize } => {
+            DlOperand::VarBit {
+                addr,
+                datatype,
+                bitoffset,
+                bitsize,
+            } => {
                 buf.push(2); // VarBit type
                 buf.push(*datatype);
                 buf.extend_from_slice(&encode_usize_be(*addr));
@@ -202,12 +221,20 @@ fn get_simple_trigger_config(loop_id: u8) -> DlConfig {
 
 fn send_configure(h: &mut MainHandler<'_, '_>, cfg: &DlConfig) -> Vec<u8> {
     let payload = encode_configure_payload(cfg);
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ConfigureDatalog as u8, &payload);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ConfigureDatalog as u8,
+        &payload,
+    );
     send_and_recv(h, &req)
 }
 
 fn get_status_state(h: &mut MainHandler<'_, '_>) -> u8 {
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetStatus as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::GetStatus as u8,
+        &[],
+    );
     let resp = send_and_recv(h, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -241,7 +268,11 @@ fn do_ownership_transfer(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLo
 
 // Arm trigger via protocol, then let loop process it.
 fn do_arm_trigger(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop) {
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ArmTrigger as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ArmTrigger as u8,
+        &[],
+    );
     let resp = send_and_recv(h, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "ArmTrigger should succeed");
@@ -315,7 +346,11 @@ fn test_unsupported() {
     for subfn in 0u8..=255 {
         let req = make_request(CommandId::DataLogControl as u8, subfn, &[]);
         let resp = send_and_recv(&mut h, &req);
-        assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8, "subfn={subfn}");
+        assert_eq!(
+            resp_code(&resp),
+            ResponseCode::UnsupportedFeature as u8,
+            "subfn={subfn}"
+        );
         h.process(0);
     }
 }
@@ -348,16 +383,29 @@ fn test_get_setup() {
     static mut DL_BUF_GET_SETUP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 256];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_GET_SETUP) }, &LOOPS_GET_SETUP);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_GET_SETUP) },
+        &LOOPS_GET_SETUP,
+    );
     connect(&mut h);
 
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetSetup as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::GetSetup as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &req);
     h.process(0);
 
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
     let p = resp_payload(&resp);
-    assert_eq!(p.len(), 6, "GetSetup payload: buf_size(4) + encoding(1) + max_signal(1)");
+    assert_eq!(
+        p.len(),
+        6,
+        "GetSetup payload: buf_size(4) + encoding(1) + max_signal(1)"
+    );
     let buf_size = u32::from_be_bytes([p[0], p[1], p[2], p[3]]);
     assert_eq!(buf_size, DATALOG_BUFFER_SIZE as u32);
     assert_eq!(p[4], 0, "Raw encoding = 0");
@@ -373,7 +421,12 @@ fn test_configure_valid() {
     static mut DL_BUF_CONFIGURE_VALID: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_CONFIGURE_VALID) }, &LOOPS_CONFIGURE_VALID);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_CONFIGURE_VALID) },
+        &LOOPS_CONFIGURE_VALID,
+    );
     connect(&mut h);
 
     let cfg = get_valid_reference_config();
@@ -391,7 +444,12 @@ fn test_configure_bad_loop_id() {
     static mut DL_BUF_BAD_LOOP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_LOOP) }, &LOOPS_BAD_LOOP);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_LOOP) },
+        &LOOPS_BAD_LOOP,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -410,7 +468,12 @@ fn test_configure_no_datalogging_support() {
     static mut DL_BUF_NO_DL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_NO_DL) }, &LOOPS_NO_DL);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_NO_DL) },
+        &LOOPS_NO_DL,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -429,7 +492,11 @@ fn get_supported_features(h: &mut MainHandler<'_, '_>) -> u8 {
 }
 
 fn get_loop_attributes(h: &mut MainHandler<'_, '_>, loop_id: u8) -> u8 {
-    let req = make_request(CommandId::GetInfo as u8, GetInfoSubfn::GetLoopDefinition as u8, &[loop_id]);
+    let req = make_request(
+        CommandId::GetInfo as u8,
+        GetInfoSubfn::GetLoopDefinition as u8,
+        &[loop_id],
+    );
     let resp = send_and_recv(h, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -447,10 +514,19 @@ fn test_datalogging_disabled_on_all_loops() {
     static mut DL_BUF_ALL_DISABLED: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ALL_DISABLED) }, &LOOPS_ALL_DISABLED);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ALL_DISABLED) },
+        &LOOPS_ALL_DISABLED,
+    );
     connect(&mut h);
 
-    assert_eq!(get_supported_features(&mut h) & 0x40, 0, "datalogging bit (0x40) must be clear");
+    assert_eq!(
+        get_supported_features(&mut h) & 0x40,
+        0,
+        "datalogging bit (0x40) must be clear"
+    );
     assert_eq!(get_loop_attributes(&mut h, 0) & 0x80, 0);
     assert_eq!(get_loop_attributes(&mut h, 1) & 0x80, 0);
 
@@ -474,7 +550,12 @@ fn test_datalogging_disabled_on_all_loops() {
             send_and_recv(&mut h, &req)
         };
         h.process(0);
-        assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8, "subfn={}", subfn as u8);
+        assert_eq!(
+            resp_code(&resp),
+            ResponseCode::UnsupportedFeature as u8,
+            "subfn={}",
+            subfn as u8
+        );
     }
 
     LOOP1.process_with_time(0);
@@ -492,12 +573,25 @@ fn test_datalogging_disabled_on_one_loop() {
     static mut DL_BUF_ONE_DISABLED: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ONE_DISABLED) }, &LOOPS_ONE_DISABLED);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ONE_DISABLED) },
+        &LOOPS_ONE_DISABLED,
+    );
     connect(&mut h);
 
-    assert_ne!(get_supported_features(&mut h) & 0x40, 0, "datalogging bit (0x40) must be set");
+    assert_ne!(
+        get_supported_features(&mut h) & 0x40,
+        0,
+        "datalogging bit (0x40) must be set"
+    );
     assert_ne!(get_loop_attributes(&mut h, 0) & 0x80, 0, "loop 0 allows datalogging");
-    assert_eq!(get_loop_attributes(&mut h, 1) & 0x80, 0, "loop 1 does not allow datalogging");
+    assert_eq!(
+        get_loop_attributes(&mut h, 1) & 0x80,
+        0,
+        "loop 1 does not allow datalogging"
+    );
 
     let mut cfg = get_valid_reference_config();
     cfg.loop_id = 1;
@@ -520,7 +614,12 @@ fn test_configure_item_count_overflow() {
     static mut DL_BUF_OVERFLOW: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OVERFLOW) }, &LOOPS_OVERFLOW);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OVERFLOW) },
+        &LOOPS_OVERFLOW,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -542,7 +641,12 @@ fn test_configure_operand_count_overflow() {
     static mut DL_BUF_OP_OVERFLOW: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OP_OVERFLOW) }, &LOOPS_OP_OVERFLOW);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OP_OVERFLOW) },
+        &LOOPS_OP_OVERFLOW,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -564,7 +668,12 @@ fn test_configure_operand_count_mismatch() {
     static mut DL_BUF_OP_MISMATCH: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OP_MISMATCH) }, &LOOPS_OP_MISMATCH);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OP_MISMATCH) },
+        &LOOPS_OP_MISMATCH,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -584,7 +693,12 @@ fn test_bad_decimation() {
     static mut DL_BUF_BAD_DEC: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_DEC) }, &LOOPS_BAD_DEC);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_DEC) },
+        &LOOPS_BAD_DEC,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -603,7 +717,12 @@ fn test_configure_bad_operands() {
     static mut DL_BUF_BAD_OP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_OP) }, &LOOPS_BAD_OP);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_OP) },
+        &LOOPS_BAD_OP,
+    );
     connect(&mut h);
 
     let bad_values: [f32; 4] = [
@@ -618,7 +737,11 @@ fn test_configure_bad_operands() {
         cfg.operands[0] = DlOperand::Literal(*bad_val);
         let resp = send_configure(&mut h, &cfg);
         h.process(0);
-        assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8, "i={i} val={bad_val}");
+        assert_eq!(
+            resp_code(&resp),
+            ResponseCode::InvalidRequest as u8,
+            "i={i} val={bad_val}"
+        );
     }
 }
 
@@ -631,7 +754,12 @@ fn test_configure_operand_bad_rpv() {
     static mut DL_BUF_BAD_RPV: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_RPV) }, &LOOPS_BAD_RPV);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_BAD_RPV) },
+        &LOOPS_BAD_RPV,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -796,7 +924,12 @@ fn test_configure_unknown_condition() {
     static mut DL_BUF_UNK_COND: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_UNK_COND) }, &LOOPS_UNK_COND);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_UNK_COND) },
+        &LOOPS_UNK_COND,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -816,7 +949,12 @@ fn test_configure_operand_var_sized_boolean_rejected() {
     static mut DL_BUF_VAR_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_VAR_SIZED_BOOL) }, &LOOPS_VAR_SIZED_BOOL);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_VAR_SIZED_BOOL) },
+        &LOOPS_VAR_SIZED_BOOL,
+    );
     connect(&mut h);
 
     for datatype in [0x31u8, 0x32, 0x33] {
@@ -827,8 +965,16 @@ fn test_configure_operand_var_sized_boolean_rejected() {
         };
         let resp = send_configure(&mut h, &cfg);
         h.process(0);
-        assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8, "datatype={datatype:#x}");
-        assert_ne!(get_status_state(&mut h), DlState::Configured as u8, "datatype={datatype:#x}");
+        assert_eq!(
+            resp_code(&resp),
+            ResponseCode::InvalidRequest as u8,
+            "datatype={datatype:#x}"
+        );
+        assert_ne!(
+            get_status_state(&mut h),
+            DlState::Configured as u8,
+            "datatype={datatype:#x}"
+        );
     }
 }
 
@@ -842,7 +988,12 @@ fn test_configure_operand_varbit_sized_boolean_rejected() {
     static mut DL_BUF_VARBIT_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_VARBIT_SIZED_BOOL) }, &LOOPS_VARBIT_SIZED_BOOL);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_VARBIT_SIZED_BOOL) },
+        &LOOPS_VARBIT_SIZED_BOOL,
+    );
     connect(&mut h);
 
     for datatype in [0x31u8, 0x32, 0x33] {
@@ -855,8 +1006,16 @@ fn test_configure_operand_varbit_sized_boolean_rejected() {
         };
         let resp = send_configure(&mut h, &cfg);
         h.process(0);
-        assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8, "datatype={datatype:#x}");
-        assert_ne!(get_status_state(&mut h), DlState::Configured as u8, "datatype={datatype:#x}");
+        assert_eq!(
+            resp_code(&resp),
+            ResponseCode::InvalidRequest as u8,
+            "datatype={datatype:#x}"
+        );
+        assert_ne!(
+            get_status_state(&mut h),
+            DlState::Configured as u8,
+            "datatype={datatype:#x}"
+        );
     }
 }
 
@@ -869,7 +1028,12 @@ fn test_configure_loggable_bad_rpv() {
     static mut DL_BUF_LOGGABLE_BAD_RPV: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_LOGGABLE_BAD_RPV) }, &LOOPS_LOGGABLE_BAD_RPV);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_LOGGABLE_BAD_RPV) },
+        &LOOPS_LOGGABLE_BAD_RPV,
+    );
     connect(&mut h);
 
     let mut cfg = get_valid_reference_config();
@@ -889,7 +1053,12 @@ fn test_owner_mechanism() {
     let mut rx = [0u8; 256];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
     let mut tx = vec![0u8; tx_size];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OWNER) }, &LOOPS_OWNER);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_OWNER) },
+        &LOOPS_OWNER,
+    );
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -916,7 +1085,11 @@ fn test_owner_mechanism() {
     // Now re-configure to loop1 — this requires releasing ownership from loop0
     let cfg1 = get_simple_trigger_config(1);
     let payload = encode_configure_payload(&cfg1);
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ConfigureDatalog as u8, &payload);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ConfigureDatalog as u8,
+        &payload,
+    );
 
     // Feed the request — it will ProcessAgain until loop0 releases
     h.receive_data(&req);
@@ -951,10 +1124,19 @@ fn test_arm_trigger_not_configured() {
     static mut DL_BUF_ARM_NOT_CFG: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ARM_NOT_CFG) }, &LOOPS_ARM_NOT_CFG);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ARM_NOT_CFG) },
+        &LOOPS_ARM_NOT_CFG,
+    );
     connect(&mut h);
 
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ArmTrigger as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ArmTrigger as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
@@ -969,7 +1151,12 @@ fn test_arm_disarm_trigger_ok() {
     static mut DL_BUF_ARM_DISARM: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ARM_DISARM) }, &LOOPS_ARM_DISARM);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ARM_DISARM) },
+        &LOOPS_ARM_DISARM,
+    );
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -985,7 +1172,11 @@ fn test_arm_disarm_trigger_ok() {
     do_ownership_transfer(&mut h, loop0);
 
     // Arm trigger
-    let arm_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ArmTrigger as u8, &[]);
+    let arm_req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ArmTrigger as u8,
+        &[],
+    );
     let arm_resp = send_and_recv(&mut h, &arm_req);
     h.process(0);
     assert_eq!(resp_code(&arm_resp), ResponseCode::Ok as u8);
@@ -996,7 +1187,11 @@ fn test_arm_disarm_trigger_ok() {
     assert_eq!(get_status_state(&mut h), DlState::Armed as u8);
 
     // Disarm trigger
-    let disarm_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::DisarmTrigger as u8, &[]);
+    let disarm_req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::DisarmTrigger as u8,
+        &[],
+    );
     let disarm_resp = send_and_recv(&mut h, &disarm_req);
     h.process(0);
     assert_eq!(resp_code(&disarm_resp), ResponseCode::Ok as u8);
@@ -1017,13 +1212,22 @@ fn test_get_status() {
     let mut rx = [0u8; 512];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
     let mut tx = vec![0u8; tx_size];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_GET_STATUS) }, &LOOPS_GET_STATUS);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_GET_STATUS) },
+        &LOOPS_GET_STATUS,
+    );
     connect(&mut h);
 
     let loop0 = &LOOP1;
 
     // Initial state: Idle
-    assert_eq!(get_status_state(&mut h), DlState::Idle as u8, "initial state should be Idle");
+    assert_eq!(
+        get_status_state(&mut h),
+        DlState::Idle as u8,
+        "initial state should be Idle"
+    );
 
     // Configure loop 0 with AlwaysTrue trigger
     let cfg = get_simple_trigger_config(0);
@@ -1036,7 +1240,11 @@ fn test_get_status() {
     // After ownership transfer: loop sends StatusUpdate when it processes
     loop0.process_with_time(0); // send status
     h.process(0); // receive status
-    assert_eq!(get_status_state(&mut h), DlState::Configured as u8, "should be Configured");
+    assert_eq!(
+        get_status_state(&mut h),
+        DlState::Configured as u8,
+        "should be Configured"
+    );
 
     // Arm via protocol
     do_arm_trigger(&mut h, loop0);
@@ -1044,7 +1252,11 @@ fn test_get_status() {
 
     // Run until acquisition complete
     run_until_acquisition(&mut h, loop0);
-    assert_eq!(get_status_state(&mut h), DlState::AcquisitionCompleted as u8, "should be AcquisitionCompleted");
+    assert_eq!(
+        get_status_state(&mut h),
+        DlState::AcquisitionCompleted as u8,
+        "should be AcquisitionCompleted"
+    );
 }
 
 #[test]
@@ -1057,7 +1269,12 @@ fn test_get_acquisition_metadata() {
     let mut rx = [0u8; 512];
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9;
     let mut tx = vec![0u8; tx_size];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_META) }, &LOOPS_META);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_META) },
+        &LOOPS_META,
+    );
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -1071,17 +1288,29 @@ fn test_get_acquisition_metadata() {
     do_ownership_transfer(&mut h, loop0);
 
     // Before acquisition: expect FailureToProceed
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::GetAcquisitionMetadata as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &req);
     h.process(0);
-    assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8, "no acquisition yet");
+    assert_eq!(
+        resp_code(&resp),
+        ResponseCode::FailureToProceed as u8,
+        "no acquisition yet"
+    );
 
     // Arm and run to completion
     do_arm_trigger(&mut h, loop0);
     run_until_acquisition(&mut h, loop0);
 
     // After acquisition: loop still owns; main must release-for-read first.
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::GetAcquisitionMetadata as u8,
+        &[],
+    );
     let resp = send_and_recv_with_release(&mut h, loop0, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "acquisition complete");
@@ -1099,10 +1328,19 @@ fn test_read_acquisition_no_data_available() {
     static mut DL_BUF_READ_NO_DATA: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_NO_DATA) }, &LOOPS_READ_NO_DATA);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_NO_DATA) },
+        &LOOPS_READ_NO_DATA,
+    );
     connect(&mut h);
 
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ReadAcquisition as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ReadAcquisition as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
@@ -1119,7 +1357,12 @@ fn test_read_acquisition_one_transfer() {
     // TX must be large enough to hold the entire buffer in one frame
     let tx_size = DATALOG_BUFFER_SIZE * (8 / 8) + 8 + 9 + 64;
     let mut tx = vec![0u8; tx_size];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_ONE) }, &LOOPS_READ_ONE);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_ONE) },
+        &LOOPS_READ_ONE,
+    );
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -1133,7 +1376,11 @@ fn test_read_acquisition_one_transfer() {
     do_arm_trigger(&mut h, loop0);
     run_until_acquisition(&mut h, loop0);
 
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ReadAcquisition as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ReadAcquisition as u8,
+        &[],
+    );
     let out = send_and_recv_with_release(&mut h, loop0, &req);
     h.process(0);
 
@@ -1173,7 +1420,12 @@ fn test_read_acquisition_multiple_transfers() {
     let mut rx = [0u8; 512];
     // Small TX buffer to force multiple transfers
     let mut tx = [0u8; TX_LEN];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_MULTI) }, &LOOPS_READ_MULTI);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_READ_MULTI) },
+        &LOOPS_READ_MULTI,
+    );
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -1194,7 +1446,11 @@ fn test_read_acquisition_multiple_transfers() {
             break;
         }
     }
-    assert_eq!(get_status_state(&mut h), DlState::AcquisitionCompleted as u8, "acquisition should complete");
+    assert_eq!(
+        get_status_state(&mut h),
+        DlState::AcquisitionCompleted as u8,
+        "acquisition should complete"
+    );
 
     // Read in multiple chunks
     let max_iterations = (DL_BUF_LEN + 4) / (TX_LEN - 9 - 4) + 10;
@@ -1203,7 +1459,11 @@ fn test_read_acquisition_multiple_transfers() {
     let mut last_crc = 0u32;
 
     for i in 0..max_iterations {
-        let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ReadAcquisition as u8, &[]);
+        let req = make_request(
+            CommandId::DataLogControl as u8,
+            DataLogControlSubfn::ReadAcquisition as u8,
+            &[],
+        );
         // First iteration releases ownership for read; later iterations run directly (owner is None).
         let resp = if i == 0 {
             send_and_recv_with_release(&mut h, loop0, &req)
@@ -1218,7 +1478,11 @@ fn test_read_acquisition_multiple_transfers() {
 
         let chunk_finished = resp[5] != 0;
         let rolling_counter = resp[6];
-        assert_eq!(rolling_counter, (i % 256) as u8, "rolling counter mismatch at iteration {i}");
+        assert_eq!(
+            rolling_counter,
+            (i % 256) as u8,
+            "rolling counter mismatch at iteration {i}"
+        );
 
         if chunk_finished {
             // Last chunk: data + crc(4)
@@ -1253,7 +1517,12 @@ fn test_reset_datalogger() {
     static mut DL_BUF_RESET: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RESET) }, &LOOPS_RESET);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RESET) },
+        &LOOPS_RESET,
+    );
     connect(&mut h);
 
     let loop0 = &LOOP1;
@@ -1277,7 +1546,11 @@ fn test_reset_datalogger() {
     assert_eq!(get_status_state(&mut h), DlState::Configured as u8);
 
     // Send Reset
-    let reset_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ResetDatalogger as u8, &[]);
+    let reset_req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ResetDatalogger as u8,
+        &[],
+    );
     h.receive_data(&reset_req);
     h.process(0); // sets pending_release, ProcessAgain
 
@@ -1292,7 +1565,11 @@ fn test_reset_datalogger() {
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "Reset should succeed");
 
     // After reset: Idle
-    assert_eq!(get_status_state(&mut h), DlState::Idle as u8, "should be Idle after reset");
+    assert_eq!(
+        get_status_state(&mut h),
+        DlState::Idle as u8,
+        "should be Idle after reset"
+    );
 }
 
 // A request that keeps returning ProcessAgain (loop never releases the datalogger) is answered
@@ -1304,7 +1581,12 @@ fn test_process_again_timeout_failure_to_proceed() {
     static mut DL_BUF_PA_TIMEOUT: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_PA_TIMEOUT) }, &LOOPS_PA_TIMEOUT);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_PA_TIMEOUT) },
+        &LOOPS_PA_TIMEOUT,
+    );
     connect(&mut h);
 
     let resp = send_configure(&mut h, &get_simple_trigger_config(0));
@@ -1315,7 +1597,11 @@ fn test_process_again_timeout_failure_to_proceed() {
 
     // The loop is not processed anymore, so it never releases the datalogger.
     let timeout_100ns = REQUEST_MAX_PROCESS_TIME_US * 10;
-    let reset_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ResetDatalogger as u8, &[]);
+    let reset_req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ResetDatalogger as u8,
+        &[],
+    );
     h.receive_data(&reset_req);
     h.process(0); // First ProcessAgain, timestamp taken
     assert_eq!(h.data_to_send(), 0);
@@ -1350,7 +1636,12 @@ fn test_process_again_completes_before_timeout() {
     static mut DL_BUF_PA_OK: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_PA_OK) }, &LOOPS_PA_OK);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_PA_OK) },
+        &LOOPS_PA_OK,
+    );
     connect(&mut h);
 
     let resp = send_configure(&mut h, &get_simple_trigger_config(0));
@@ -1361,7 +1652,11 @@ fn test_process_again_completes_before_timeout() {
 
     let timeout_100ns = REQUEST_MAX_PROCESS_TIME_US * 10;
     let step = timeout_100ns / 10;
-    let reset_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ResetDatalogger as u8, &[]);
+    let reset_req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ResetDatalogger as u8,
+        &[],
+    );
     h.receive_data(&reset_req);
     h.process(0); // First ProcessAgain, timestamp taken
 
@@ -1395,7 +1690,10 @@ fn get_counter_trigger_config(counter: &AtomicU32) -> DlConfig {
         operands: vec![],
         signals: vec![
             DlSignal::Time,
-            DlSignal::Memory { addr: counter.as_ptr() as usize, size: 4 },
+            DlSignal::Memory {
+                addr: counter.as_ptr() as usize,
+                size: 4,
+            },
         ],
     }
 }
@@ -1431,14 +1729,22 @@ fn setup_completed_counter_acquisition(h: &mut MainHandler<'_, '_>, loop_handler
 fn read_all_acquisition(h: &mut MainHandler<'_, '_>, acquisition_id: u16) -> Vec<u8> {
     let mut all_data: Vec<u8> = Vec::new();
     for i in 0..200usize {
-        let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ReadAcquisition as u8, &[]);
+        let req = make_request(
+            CommandId::DataLogControl as u8,
+            DataLogControlSubfn::ReadAcquisition as u8,
+            &[],
+        );
         let resp = send_and_recv(h, &req);
         h.process(0);
         assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "chunk {i}");
         let p = resp_payload(&resp);
         assert!(p.len() >= 4, "chunk {i}: payload too short");
         assert_eq!(p[1], (i % 256) as u8, "rolling counter mismatch at chunk {i}");
-        assert_eq!(u16::from_be_bytes([p[2], p[3]]), acquisition_id, "acquisition ID mismatch at chunk {i}");
+        assert_eq!(
+            u16::from_be_bytes([p[2], p[3]]),
+            acquisition_id,
+            "acquisition ID mismatch at chunk {i}"
+        );
         let finished = p[0] != 0;
         if finished {
             assert!(p.len() >= 8, "chunk {i}: last payload too short");
@@ -1483,10 +1789,18 @@ fn check_counter_entries(data: &[u8]) {
 // release-for-read flow, then reads the data. Returns the metadata payload.
 fn do_explicit_read_release_flow(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop) -> Vec<u8> {
     assert!(h.datalogging_ownership_taken());
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::GetAcquisitionMetadata as u8,
+        &[],
+    );
     h.receive_data(&req);
     h.process(0); // ProcessAgain, ReleaseOwnership sent to the loop
-    assert_eq!(h.data_to_send(), 0, "no response before the loop releases the datalogger");
+    assert_eq!(
+        h.data_to_send(),
+        0,
+        "no response before the loop releases the datalogger"
+    );
     assert!(h.datalogging_ownership_taken(), "loop still owns the datalogger");
 
     loop_handler.process_with_time(0); // Releases the datalogger
@@ -1496,7 +1810,10 @@ fn do_explicit_read_release_flow(h: &mut MainHandler<'_, '_>, loop_handler: &imp
     assert_eq!(resp[0], CommandId::DataLogControl as u8 | 0x80);
     assert_eq!(resp[1], DataLogControlSubfn::GetAcquisitionMetadata as u8);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
-    assert!(!h.datalogging_ownership_taken(), "loop should have released the datalogger");
+    assert!(
+        !h.datalogging_ownership_taken(),
+        "loop should have released the datalogger"
+    );
 
     let metadata = resp_payload(&resp).to_vec();
     assert_eq!(metadata.len(), 16);
@@ -1528,14 +1845,23 @@ fn test_read_release_flow_explicit() {
     static COUNTER_RR_EXPLICIT: AtomicU32 = AtomicU32::new(1000);
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 64]; // Forces several ReadAcquisition chunks
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_EXPLICIT) }, &LOOPS_RR_EXPLICIT);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_EXPLICIT) },
+        &LOOPS_RR_EXPLICIT,
+    );
     connect(&mut h);
 
     setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_RR_EXPLICIT);
     do_explicit_read_release_flow(&mut h, &LOOP1);
 
     // A second read gives the same data, nothing was consumed or reset.
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::GetAcquisitionMetadata as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -1552,18 +1878,31 @@ fn test_arm_after_read_fails() {
     static COUNTER_RR_ARM: AtomicU32 = AtomicU32::new(1000);
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 64];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_ARM) }, &LOOPS_RR_ARM);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_ARM) },
+        &LOOPS_RR_ARM,
+    );
     connect(&mut h);
 
     setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_RR_ARM);
     do_explicit_read_release_flow(&mut h, &LOOP1);
 
-    let arm_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ArmTrigger as u8, &[]);
+    let arm_req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ArmTrigger as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &arm_req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
 
-    let disarm_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::DisarmTrigger as u8, &[]);
+    let disarm_req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::DisarmTrigger as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &disarm_req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
@@ -1585,13 +1924,22 @@ fn test_full_server_sequence() {
     static COUNTER_SERVER_SEQ: AtomicU32 = AtomicU32::new(1000);
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 64];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_SERVER_SEQ) }, &LOOPS_SERVER_SEQ);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_SERVER_SEQ) },
+        &LOOPS_SERVER_SEQ,
+    );
     connect(&mut h);
 
     for cycle in 0..2 {
         setup_completed_counter_acquisition(&mut h, &LOOP1, &COUNTER_SERVER_SEQ);
 
-        let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+        let req = make_request(
+            CommandId::DataLogControl as u8,
+            DataLogControlSubfn::GetAcquisitionMetadata as u8,
+            &[],
+        );
         let resp = send_and_recv_with_release(&mut h, &LOOP1, &req);
         h.process(0);
         assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "cycle {cycle}");
@@ -1607,7 +1955,11 @@ fn test_full_server_sequence() {
         assert_eq!(data.len(), data_size, "cycle {cycle}");
         check_counter_entries(&data);
 
-        let reset_req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ResetDatalogger as u8, &[]);
+        let reset_req = make_request(
+            CommandId::DataLogControl as u8,
+            DataLogControlSubfn::ResetDatalogger as u8,
+            &[],
+        );
         let resp = send_and_recv(&mut h, &reset_req);
         h.process(0);
         assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "cycle {cycle}");
@@ -1626,7 +1978,12 @@ fn test_release_without_read_resets() {
     static COUNTER_RR_RESET: AtomicU32 = AtomicU32::new(1000);
     let mut rx = [0u8; 256];
     let mut tx = [0u8; 64];
-    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_RESET) }, &LOOPS_RR_RESET);
+    let mut h = make_handler_with_loops(
+        &mut rx,
+        &mut tx,
+        unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_RR_RESET) },
+        &LOOPS_RR_RESET,
+    );
     connect(&mut h);
 
     // First cycle uses the release-for-read path (reset_on_release = false).
@@ -1638,7 +1995,11 @@ fn test_release_without_read_resets() {
     assert!(h.datalogging_data_available());
 
     let payload = encode_configure_payload(&get_counter_trigger_config(&COUNTER_RR_RESET));
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::ConfigureDatalog as u8, &payload);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::ConfigureDatalog as u8,
+        &payload,
+    );
     h.receive_data(&req);
     h.process(0); // ProcessAgain, ReleaseOwnership sent to the loop
     assert_eq!(h.data_to_send(), 0);
@@ -1661,9 +2022,17 @@ fn test_release_without_read_resets() {
     LOOP1.process_with_time(0);
     h.process(0);
     assert!(!h.datalogging_ownership_taken());
-    assert_eq!(get_status_state(&mut h), DlState::Idle as u8, "release without read must reset the datalogger");
+    assert_eq!(
+        get_status_state(&mut h),
+        DlState::Idle as u8,
+        "release without read must reset the datalogger"
+    );
     assert!(!h.datalogging_data_available());
-    let req = make_request(CommandId::DataLogControl as u8, DataLogControlSubfn::GetAcquisitionMetadata as u8, &[]);
+    let req = make_request(
+        CommandId::DataLogControl as u8,
+        DataLogControlSubfn::GetAcquisitionMetadata as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &req);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);

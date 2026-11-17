@@ -1,16 +1,18 @@
 #![cfg(feature = "datalogging")]
 
 use scrutiny_embedded_rust::datalogging::trigger::{
-    always_true_eval, change_more_than_eval, change_more_than_reset, equal_eval,
-    greater_or_equal_than_eval, greater_than_eval, is_within_eval, less_or_equal_than_eval,
-    less_than_eval, not_equal_eval, ConditionSharedData,
+    always_true_eval, change_more_than_eval, change_more_than_reset, equal_eval, greater_or_equal_than_eval,
+    greater_than_eval, is_within_eval, less_or_equal_than_eval, less_than_eval, not_equal_eval, ConditionSharedData,
 };
 use scrutiny_embedded_rust::datalogging::AnyValAndTypePair;
 use scrutiny_embedded_rust::tools::{set_biggest_sint, set_biggest_uint};
 use scrutiny_embedded_rust::types::{AnyType, IntBiggest, UintBiggest, VariableType, BIGGEST_SINT, BIGGEST_UINT};
 
 fn fp(v: f32) -> AnyValAndTypePair {
-    AnyValAndTypePair { val: AnyType { float32: v }, valtype: VariableType::Float32 }
+    AnyValAndTypePair {
+        val: AnyType { float32: v },
+        valtype: VariableType::Float32,
+    }
 }
 fn sp(v: IntBiggest) -> AnyValAndTypePair {
     let mut p = AnyValAndTypePair::DEFAULT;
@@ -25,7 +27,11 @@ fn up(v: UintBiggest) -> AnyValAndTypePair {
     p
 }
 fn ord2(swap: bool, a: AnyValAndTypePair, b: AnyValAndTypePair) -> [AnyValAndTypePair; 2] {
-    if swap { [b, a] } else { [a, b] }
+    if swap {
+        [b, a]
+    } else {
+        [a, b]
+    }
 }
 
 #[test]
@@ -148,20 +154,20 @@ fn change_more_than_basic() {
     assert!(!change_more_than_eval(&mut d, &[fp(10.0), fp(5.0)])); // 10 > 15? No
     assert!(!change_more_than_eval(&mut d, &[fp(10.0), fp(5.0)]));
     assert!(!change_more_than_eval(&mut d, &[fp(11.0), fp(5.0)])); // 11 > 15? No, prev=11
-    assert!(!change_more_than_eval(&mut d, &[fp(5.0), fp(5.0)]));  // 5 > 16? No, prev=5
-    assert!(change_more_than_eval(&mut d, &[fp(10.1), fp(5.0)]));  // 10.1 > 10? Yes, prev=10.1
+    assert!(!change_more_than_eval(&mut d, &[fp(5.0), fp(5.0)])); // 5 > 16? No, prev=5
+    assert!(change_more_than_eval(&mut d, &[fp(10.1), fp(5.0)])); // 10.1 > 10? Yes, prev=10.1
     assert!(!change_more_than_eval(&mut d, &[fp(11.0), fp(5.0)])); // 11 > 15.1? No, prev=11
-    assert!(change_more_than_eval(&mut d, &[fp(20.0), fp(5.0)]));  // 20 > 16? Yes, prev=20
-    assert!(change_more_than_eval(&mut d, &[fp(30.0), fp(5.0)]));  // 30 > 25? Yes
+    assert!(change_more_than_eval(&mut d, &[fp(20.0), fp(5.0)])); // 20 > 16? Yes, prev=20
+    assert!(change_more_than_eval(&mut d, &[fp(30.0), fp(5.0)])); // 30 > 25? Yes
 
     change_more_than_reset(&mut d);
     assert!(!change_more_than_eval(&mut d, &[fp(10.0), fp(-5.0)])); // init, prev=10
     assert!(!change_more_than_eval(&mut d, &[fp(10.0), fp(-5.0)])); // 10 < 5? No
     assert!(!change_more_than_eval(&mut d, &[fp(20.0), fp(-5.0)])); // 20 < 5? No, prev=20
-    assert!(change_more_than_eval(&mut d, &[fp(14.9), fp(-5.0)]));  // 14.9 < 15? Yes, prev=14.9
+    assert!(change_more_than_eval(&mut d, &[fp(14.9), fp(-5.0)])); // 14.9 < 15? Yes, prev=14.9
     assert!(!change_more_than_eval(&mut d, &[fp(14.0), fp(-5.0)])); // 14 < 9.9? No, prev=14
-    assert!(change_more_than_eval(&mut d, &[fp(5.0), fp(-5.0)]));   // 5 < 9? Yes, prev=5
-    assert!(change_more_than_eval(&mut d, &[fp(-5.0), fp(-5.0)]));  // -5 < 0? Yes
+    assert!(change_more_than_eval(&mut d, &[fp(5.0), fp(-5.0)])); // 5 < 9? Yes, prev=5
+    assert!(change_more_than_eval(&mut d, &[fp(-5.0), fp(-5.0)])); // -5 < 0? Yes
 }
 
 #[test]
@@ -208,11 +214,26 @@ fn change_more_than_all_types() {
     assert!(!change_more_than_eval(&mut d, &[up(b), up(5)]));
     assert!(!change_more_than_eval(&mut d, &[up(b), up(5)]));
     assert!(!change_more_than_eval(&mut d, &[up(b.wrapping_add(1)), up(5)]));
-    assert!(!change_more_than_eval(&mut d, &[up(b.wrapping_add(1).wrapping_sub(10)), up(5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_sub(9).wrapping_add(6)), up(5)]));
-    assert!(!change_more_than_eval(&mut d, &[up(b.wrapping_sub(3).wrapping_add(2)), up(5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_sub(1).wrapping_add(6)), up(5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_add(5).wrapping_add(10)), up(5)]));
+    assert!(!change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_add(1).wrapping_sub(10)), up(5)]
+    ));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_sub(9).wrapping_add(6)), up(5)]
+    ));
+    assert!(!change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_sub(3).wrapping_add(2)), up(5)]
+    ));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_sub(1).wrapping_add(6)), up(5)]
+    ));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_add(5).wrapping_add(10)), up(5)]
+    ));
 
     // ── Uint value, Sint threshold (positive) ───────────────────────────────
     change_more_than_reset(&mut d);
@@ -221,11 +242,26 @@ fn change_more_than_all_types() {
     assert!(!change_more_than_eval(&mut d, &[up(b), sp(5)]));
     assert!(!change_more_than_eval(&mut d, &[up(b), sp(5)]));
     assert!(!change_more_than_eval(&mut d, &[up(b.wrapping_add(1)), sp(5)]));
-    assert!(!change_more_than_eval(&mut d, &[up(b.wrapping_add(1).wrapping_sub(10)), sp(5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_sub(9).wrapping_add(6)), sp(5)]));
-    assert!(!change_more_than_eval(&mut d, &[up(b.wrapping_sub(3).wrapping_add(4)), sp(5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_add(1).wrapping_add(10)), sp(5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_add(11).wrapping_add(6)), sp(5)]));
+    assert!(!change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_add(1).wrapping_sub(10)), sp(5)]
+    ));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_sub(9).wrapping_add(6)), sp(5)]
+    ));
+    assert!(!change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_sub(3).wrapping_add(4)), sp(5)]
+    ));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_add(1).wrapping_add(10)), sp(5)]
+    ));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_add(11).wrapping_add(6)), sp(5)]
+    ));
 
     // ── Uint value, Sint threshold (negative) ───────────────────────────────
     change_more_than_reset(&mut d);
@@ -233,10 +269,22 @@ fn change_more_than_all_types() {
     assert!(!change_more_than_eval(&mut d, &[up(b), sp(-5)]));
     assert!(!change_more_than_eval(&mut d, &[up(b), sp(-5)]));
     assert!(!change_more_than_eval(&mut d, &[up(b.wrapping_add(20)), sp(-5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_add(20).wrapping_sub(6)), sp(-5)]));
-    assert!(!change_more_than_eval(&mut d, &[up(b.wrapping_add(14).wrapping_sub(4)), sp(-5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_add(10).wrapping_sub(100)), sp(-5)]));
-    assert!(change_more_than_eval(&mut d, &[up(b.wrapping_sub(90).wrapping_sub(10)), sp(-5)]));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_add(20).wrapping_sub(6)), sp(-5)]
+    ));
+    assert!(!change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_add(14).wrapping_sub(4)), sp(-5)]
+    ));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_add(10).wrapping_sub(100)), sp(-5)]
+    ));
+    assert!(change_more_than_eval(
+        &mut d,
+        &[up(b.wrapping_sub(90).wrapping_sub(10)), sp(-5)]
+    ));
 
     // ── Sint value, Sint threshold (positive) ───────────────────────────────
     change_more_than_reset(&mut d);

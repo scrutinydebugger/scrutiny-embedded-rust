@@ -30,7 +30,6 @@ pub type DataloggingTriggerCallback = fn(Option<&'static str>);
 /// Datalogger buffer descriptor returned by `Config::take_datalogger_buf`.
 pub(crate) type DataloggerBufDesc = (*mut u8, usize, Option<DataloggingTriggerCallback>);
 
-
 /// Runtime configuration handed to `MainHandler` at startup.
 ///
 /// Caller-allocated buffers are borrowed for lifetime `'buf`; all array pointers

@@ -7,7 +7,7 @@ use scrutiny_embedded_rust::config::Config;
 use scrutiny_embedded_rust::datalogging::State as DlState;
 use scrutiny_embedded_rust::loop_handler::{FixedFreqLoopHandler, LoopHandler};
 use scrutiny_embedded_rust::main_handler::MainHandler;
-use scrutiny_embedded_rust::protocol::{CommandId, CommControlSubfn, DataLogControlSubfn, ResponseCode, CONNECT_MAGIC};
+use scrutiny_embedded_rust::protocol::{CommControlSubfn, CommandId, DataLogControlSubfn, ResponseCode, CONNECT_MAGIC};
 use scrutiny_embedded_rust::tools::crc32;
 use scrutiny_embedded_rust::types::VariableType;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -93,7 +93,12 @@ fn send_and_wait(h: &mut MainHandler<'_, '_>, req: &[u8]) -> Vec<u8> {
         if h.data_to_send() > 0 {
             break;
         }
-        assert!(start.elapsed() < WAIT_TIMEOUT, "No response to command {:#04x}/{:#04x}", req[0], req[1]);
+        assert!(
+            start.elapsed() < WAIT_TIMEOUT,
+            "No response to command {:#04x}/{:#04x}",
+            req[0],
+            req[1]
+        );
         std::thread::sleep(POLL_PERIOD);
     }
     let resp = pop_response(h);
@@ -109,7 +114,11 @@ fn send_datalog_request(h: &mut MainHandler<'_, '_>, subfn: DataLogControlSubfn,
 }
 
 fn connect(h: &mut MainHandler<'_, '_>) {
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &CONNECT_MAGIC);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &CONNECT_MAGIC,
+    );
     let resp = send_and_wait(h, &req);
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
 }
@@ -164,7 +173,10 @@ fn wait_for_state(h: &mut MainHandler<'_, '_>, state: DlState) {
         if get_status_state(h) == state as u8 {
             return;
         }
-        assert!(start.elapsed() < WAIT_TIMEOUT, "Datalogger did not reach state {state:?}");
+        assert!(
+            start.elapsed() < WAIT_TIMEOUT,
+            "Datalogger did not reach state {state:?}"
+        );
         std::thread::sleep(POLL_PERIOD);
     }
 }
@@ -176,7 +188,10 @@ fn wait_for_ownership_taken(h: &mut MainHandler<'_, '_>) {
         if h.datalogging_ownership_taken() {
             return;
         }
-        assert!(start.elapsed() < WAIT_TIMEOUT, "Loop did not take ownership of the datalogger");
+        assert!(
+            start.elapsed() < WAIT_TIMEOUT,
+            "Loop did not take ownership of the datalogger"
+        );
         std::thread::sleep(POLL_PERIOD);
     }
 }
@@ -190,7 +205,11 @@ fn read_all_acquisition(h: &mut MainHandler<'_, '_>, acquisition_id: u16) -> Vec
         let p = resp_payload(&resp);
         assert!(p.len() >= 4, "chunk {i}: payload too short");
         assert_eq!(p[1], (i % 256) as u8, "rolling counter mismatch at chunk {i}");
-        assert_eq!(u16::from_be_bytes([p[2], p[3]]), acquisition_id, "acquisition ID mismatch at chunk {i}");
+        assert_eq!(
+            u16::from_be_bytes([p[2], p[3]]),
+            acquisition_id,
+            "acquisition ID mismatch at chunk {i}"
+        );
         let finished = p[0] != 0;
         if finished {
             assert!(p.len() >= 8, "chunk {i}: last payload too short");
@@ -223,7 +242,11 @@ fn decode_entries(data: &[u8]) -> Vec<(u32, u32)> {
 fn run_acquisition_cycle(h: &mut MainHandler<'_, '_>, cycle: u32) {
     THRESHOLD.store(u32::MAX, Ordering::SeqCst);
 
-    let resp = send_datalog_request(h, DataLogControlSubfn::ConfigureDatalog, &encode_threshold_configure_payload());
+    let resp = send_datalog_request(
+        h,
+        DataLogControlSubfn::ConfigureDatalog,
+        &encode_threshold_configure_payload(),
+    );
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "cycle {cycle}: Configure");
     wait_for_ownership_taken(h);
 
@@ -237,7 +260,11 @@ fn run_acquisition_cycle(h: &mut MainHandler<'_, '_>, cycle: u32) {
     wait_for_state(h, DlState::AcquisitionCompleted);
 
     let resp = send_datalog_request(h, DataLogControlSubfn::GetAcquisitionMetadata, &[]);
-    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "cycle {cycle}: GetAcquisitionMetadata");
+    assert_eq!(
+        resp_code(&resp),
+        ResponseCode::Ok as u8,
+        "cycle {cycle}: GetAcquisitionMetadata"
+    );
     let p = resp_payload(&resp);
     assert_eq!(p.len(), 16, "cycle {cycle}: metadata length");
     let acquisition_id = u16::from_be_bytes([p[0], p[1]]);
@@ -248,8 +275,14 @@ fn run_acquisition_cycle(h: &mut MainHandler<'_, '_>, cycle: u32) {
     assert_eq!(config_id, CONFIG_ID, "cycle {cycle}");
     assert!(entry_count > 0, "cycle {cycle}: no entry");
     assert_eq!(data_size, entry_count * ENTRY_SIZE, "cycle {cycle}");
-    assert!(points_after_trigger < entry_count, "cycle {cycle}: trigger outside of the acquisition");
-    assert!(!h.datalogging_ownership_taken(), "cycle {cycle}: the loop should have released the datalogger");
+    assert!(
+        points_after_trigger < entry_count,
+        "cycle {cycle}: trigger outside of the acquisition"
+    );
+    assert!(
+        !h.datalogging_ownership_taken(),
+        "cycle {cycle}: the loop should have released the datalogger"
+    );
 
     let data = read_all_acquisition(h, acquisition_id);
     assert_eq!(data.len(), data_size, "cycle {cycle}");
@@ -260,20 +293,39 @@ fn run_acquisition_cycle(h: &mut MainHandler<'_, '_>, cycle: u32) {
     for i in 1..entries.len() {
         let (prev_time, prev_counter) = entries[i - 1];
         let (time, counter) = entries[i];
-        assert!(counter > prev_counter, "cycle {cycle} entry {i}: counter not strictly increasing");
+        assert!(
+            counter > prev_counter,
+            "cycle {cycle} entry {i}: counter not strictly increasing"
+        );
         assert_eq!(counter - prev_counter, 1, "cycle {cycle} entry {i}: counter step");
-        assert_eq!(time.wrapping_sub(prev_time), LOOP_TIMESTEP, "cycle {cycle} entry {i}: time step");
+        assert_eq!(
+            time.wrapping_sub(prev_time),
+            LOOP_TIMESTEP,
+            "cycle {cycle} entry {i}: time step"
+        );
     }
 
     // The trigger entry is the last one before the points logged after the trigger.
     let trigger_index = entry_count - points_after_trigger - 1;
-    assert_eq!(entries[trigger_index].1, threshold + 1, "cycle {cycle}: counter at the trigger point");
+    assert_eq!(
+        entries[trigger_index].1,
+        threshold + 1,
+        "cycle {cycle}: counter at the trigger point"
+    );
     if trigger_index > 0 {
-        assert_eq!(entries[trigger_index - 1].1, threshold, "cycle {cycle}: counter before the trigger point");
+        assert_eq!(
+            entries[trigger_index - 1].1,
+            threshold,
+            "cycle {cycle}: counter before the trigger point"
+        );
     }
 
     let resp = send_datalog_request(h, DataLogControlSubfn::ResetDatalogger, &[]);
-    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8, "cycle {cycle}: ResetDatalogger");
+    assert_eq!(
+        resp_code(&resp),
+        ResponseCode::Ok as u8,
+        "cycle {cycle}: ResetDatalogger"
+    );
     assert_eq!(get_status_state(h), DlState::Idle as u8, "cycle {cycle}");
     assert!(!h.datalogging_data_available(), "cycle {cycle}");
 }

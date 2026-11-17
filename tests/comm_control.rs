@@ -1,4 +1,6 @@
-use scrutiny_embedded_rust::build_config::{COMM_HEARTBEAT_TIMEOUT_US, COMM_RX_TIMEOUT_US, PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR};
+use scrutiny_embedded_rust::build_config::{
+    COMM_HEARTBEAT_TIMEOUT_US, COMM_RX_TIMEOUT_US, PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR,
+};
 use scrutiny_embedded_rust::config::Config;
 use scrutiny_embedded_rust::main_handler::MainHandler;
 use scrutiny_embedded_rust::protocol::{CommControlSubfn, CommandId, ResponseCode, CONNECT_MAGIC, DISCOVER_MAGIC};
@@ -35,7 +37,11 @@ fn send_and_recv(h: &mut MainHandler<'_, '_>, req: &[u8]) -> Vec<u8> {
 }
 
 fn connect(h: &mut MainHandler<'_, '_>) -> u32 {
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &CONNECT_MAGIC);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &CONNECT_MAGIC,
+    );
     h.receive_data(&req);
     h.process(0);
     let n = h.data_to_send() as usize;
@@ -117,7 +123,11 @@ fn test_discover_wrong_magic_while_disconnected_is_silently_dropped() {
     cfg.set_buffers(&mut rx, &mut tx);
     let mut h = MainHandler::new(cfg).unwrap();
 
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Discover as u8, &[0u8; 4]);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Discover as u8,
+        &[0u8; 4],
+    );
     h.receive_data(&req);
     h.process(0);
     assert_eq!(h.data_to_send(), 0);
@@ -133,7 +143,11 @@ fn test_discover_wrong_magic_while_connected_returns_invalid_request() {
 
     connect(&mut h);
 
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Discover as u8, &[0u8; 4]);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Discover as u8,
+        &[0u8; 4],
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp[2], ResponseCode::InvalidRequest as u8);
 }
@@ -149,7 +163,11 @@ fn test_connect() {
     let mut h = MainHandler::new(cfg).unwrap();
 
     assert!(!h.is_connected());
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &CONNECT_MAGIC);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &CONNECT_MAGIC,
+    );
     h.receive_data(&req);
     h.process(0);
 
@@ -180,7 +198,11 @@ fn test_connect_busy_when_already_connected() {
     connect(&mut h);
     assert!(h.is_connected());
 
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &CONNECT_MAGIC);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &CONNECT_MAGIC,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp[2], ResponseCode::Busy as u8);
 }
@@ -202,7 +224,11 @@ fn test_heartbeat() {
         hb_data[0..4].copy_from_slice(&session_id.to_be_bytes());
         hb_data[4..6].copy_from_slice(&challenge.to_be_bytes());
 
-        let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Heartbeat as u8, &hb_data);
+        let req = make_request(
+            CommandId::CommControl as u8,
+            CommControlSubfn::Heartbeat as u8,
+            &hb_data,
+        );
         h.receive_data(&req);
         // Step less than the heartbeat timeout to verify the session stays alive.
         h.process(COMM_HEARTBEAT_TIMEOUT_US / 2);
@@ -235,7 +261,11 @@ fn test_heartbeat_wrong_session_id() {
     let bad_id = session_id.wrapping_add(1);
     let mut hb_data = [0u8; 6];
     hb_data[0..4].copy_from_slice(&bad_id.to_be_bytes());
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Heartbeat as u8, &hb_data);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Heartbeat as u8,
+        &hb_data,
+    );
     let resp = send_and_recv(&mut h, &req);
     assert_eq!(resp[2], ResponseCode::InvalidRequest as u8);
 }
@@ -271,9 +301,18 @@ fn test_get_params() {
     assert_eq!(u16::from_be_bytes([resp[5], resp[6]]), 64);
     assert_eq!(u16::from_be_bytes([resp[7], resp[8]]), 64);
     assert_eq!(u32::from_be_bytes([resp[9], resp[10], resp[11], resp[12]]), 500_000);
-    assert_eq!(u32::from_be_bytes([resp[13], resp[14], resp[15], resp[16]]), COMM_HEARTBEAT_TIMEOUT_US);
-    assert_eq!(u32::from_be_bytes([resp[17], resp[18], resp[19], resp[20]]), COMM_RX_TIMEOUT_US);
-    assert_eq!(resp[21], u8::try_from(core::mem::size_of::<*const u8>()).unwrap_or(u8::MAX));
+    assert_eq!(
+        u32::from_be_bytes([resp[13], resp[14], resp[15], resp[16]]),
+        COMM_HEARTBEAT_TIMEOUT_US
+    );
+    assert_eq!(
+        u32::from_be_bytes([resp[17], resp[18], resp[19], resp[20]]),
+        COMM_RX_TIMEOUT_US
+    );
+    assert_eq!(
+        resp[21],
+        u8::try_from(core::mem::size_of::<*const u8>()).unwrap_or(u8::MAX)
+    );
     assert_eq!(resp[22], 8u8);
 }
 
@@ -339,7 +378,11 @@ fn test_connect_wrong_magic() {
     let mut h = MainHandler::new(cfg).unwrap();
 
     let bad_magic = [0x00u8, 0x00, 0x00, 0x00];
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &bad_magic);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &bad_magic,
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp[2], ResponseCode::InvalidRequest as u8);

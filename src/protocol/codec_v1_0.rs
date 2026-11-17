@@ -982,7 +982,11 @@ pub fn encode_response_datalogging_read_acquisition(
     tx_buf[1] = rolling_counter;
     tx_buf[2..4].copy_from_slice(&acq_id.to_be_bytes());
 
-    let total = if finished { HEADER + nread + CRC_SIZE } else { HEADER + nread };
+    let total = if finished {
+        HEADER + nread + CRC_SIZE
+    } else {
+        HEADER + nread
+    };
     Ok((u16::try_from(total).unwrap_or(u16::MAX), finished))
 }
 
@@ -1064,7 +1068,12 @@ pub(crate) fn decode_datalogging_configure_request(
                 cursor += 1;
                 let bitsize = data[cursor];
                 cursor += 1;
-                Operand::VarBit { addr, datatype, bitoffset, bitsize }
+                Operand::VarBit {
+                    addr,
+                    datatype,
+                    bitoffset,
+                    bitsize,
+                }
             }
             3 => {
                 // Rpv: id(2)

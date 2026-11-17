@@ -1,16 +1,13 @@
 use crate::datalogging::raw_encoder::RawFormatEncoder;
-use crate::datalogging::trigger::{
-    active_condition_for, ActiveCondition, ConditionSharedData,
-};
+use crate::datalogging::trigger::{active_condition_for, ActiveCondition, ConditionSharedData};
 use crate::datalogging::types::{
-    AnyValAndTypePair, Configuration, LoggableItem, Operand, SupportedTriggerConditions,
-    MAX_OPERANDS,
+    AnyValAndTypePair, Configuration, LoggableItem, Operand, SupportedTriggerConditions, MAX_OPERANDS,
 };
 use crate::timebase::Timebase;
 use crate::tools::{get_var_type_type, is_supported_type, TypeSize};
 use crate::types::{
-    AnyType, IntBiggest, RuntimePublishedValue, Timestamp, UintBiggest, VariableType,
-    VariableTypeType, BIGGEST_SINT, BIGGEST_UINT,
+    AnyType, IntBiggest, RuntimePublishedValue, Timestamp, UintBiggest, VariableType, VariableTypeType, BIGGEST_SINT,
+    BIGGEST_UINT,
 };
 
 // ── Host interface ────────────────────────────────────────────────────────────
@@ -37,7 +34,9 @@ pub(crate) trait DataloggerHost {
 
     /// Identity of the caller (loop name) for callbacks that need to disambiguate contexts.
     /// Default is `None`, which represents a call originating from the main handler.
-    fn caller_name(&self) -> Option<&'static str> { None }
+    fn caller_name(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 // ── DataLogger state machine ──────────────────────────────────────────────────
@@ -141,11 +140,7 @@ impl DataLogger {
 
     /// Applies the current configuration (set via `config_mut()`) and transitions to `Configured`.
     /// Call once per acquisition request.
-    pub(crate) fn configure(
-        &mut self,
-        config_id: u16,
-        host: &dyn DataloggerHost,
-    ) {
+    pub(crate) fn configure(&mut self, config_id: u16, host: &dyn DataloggerHost) {
         self.reset();
         self.config_valid = true;
         self.config_id = config_id;
@@ -200,17 +195,14 @@ impl DataLogger {
                         ..
                     } => {
                         #[allow(clippy::cast_possible_truncation)]
-                        let max_bits =
-                            (core::mem::size_of::<UintBiggest>() * 8) as u8;
+                        let max_bits = (core::mem::size_of::<UintBiggest>() * 8) as u8;
                         if bitoffset >= max_bits || bitsize > max_bits || bitsize == 0 {
                             self.config_valid = false;
                         }
                         if !is_supported_type(datatype) {
                             self.config_valid = false;
                         }
-                        if u16::from(bitoffset) + u16::from(bitsize)
-                            > u16::from(datatype.type_size()) * 8
-                        {
+                        if u16::from(bitoffset) + u16::from(bitsize) > u16::from(datatype.type_size()) * 8 {
                             self.config_valid = false;
                         }
                     }
@@ -324,29 +316,20 @@ impl DataLogger {
         }
 
         for i in 0..nb_operands {
-            if !fetch_operand(
-                host,
-                &self.config.trigger.operands[i],
-                &mut self.ops_data[i],
-            ) {
+            if !fetch_operand(host, &self.config.trigger.operands[i], &mut self.ops_data[i]) {
                 return false;
             }
             convert_to_compare_type(&mut self.ops_data[i]);
         }
 
-        let condition_result = (self.trigger.active_condition.eval_fn)(
-            &mut self.trigger.condition_data,
-            &self.ops_data[..nb_operands],
-        );
+        let condition_result =
+            (self.trigger.active_condition.eval_fn)(&mut self.trigger.condition_data, &self.ops_data[..nb_operands]);
 
         if condition_result {
             if !self.trigger.previous_val {
                 self.trigger.rising_edge_timestamp = timebase.get_timestamp();
             }
-            if timebase.has_expired(
-                self.trigger.rising_edge_timestamp,
-                self.config.trigger.hold_time_100ns,
-            ) {
+            if timebase.has_expired(self.trigger.rising_edge_timestamp, self.config.trigger.hold_time_100ns) {
                 self.trigger.previous_val = condition_result;
                 return true;
             }
@@ -467,8 +450,7 @@ impl DataLogger {
     fn process_acquisition(&mut self, timebase: &Timebase, host: &dyn DataloggerHost) {
         self.decimation_counter += 1;
         if self.decimation_counter >= self.config.decimation {
-            self.encoder
-                .encode_next_entry(&self.config, timebase.get_timestamp(), host);
+            self.encoder.encode_next_entry(&self.config, timebase.get_timestamp(), host);
             self.decimation_counter = 0;
         }
     }
@@ -501,8 +483,7 @@ impl DataLogger {
         }
 
         if self.state == State::Triggered {
-            if self.config.timeout_100ns > 0
-                && timebase.has_expired(self.trigger_timestamp, self.config.timeout_100ns)
+            if self.config.timeout_100ns > 0 && timebase.has_expired(self.trigger_timestamp, self.config.timeout_100ns)
             {
                 return true;
             }
@@ -519,11 +500,7 @@ impl DataLogger {
 
 /// Reads one operand and stores value + type in `out`.
 /// Returns `false` on failure (bad operand type, RPV not found, etc.).
-pub(crate) fn fetch_operand(
-    host: &dyn DataloggerHost,
-    operand: &Operand,
-    out: &mut AnyValAndTypePair,
-) -> bool {
+pub(crate) fn fetch_operand(host: &dyn DataloggerHost, operand: &Operand, out: &mut AnyValAndTypePair) -> bool {
     match *operand {
         Operand::Literal(val) => {
             out.val = AnyType { float32: val };
@@ -639,11 +616,7 @@ pub(crate) fn fetch_variable_bitfield(
     } as UintBiggest;
 
     // Mask computed in u64 so that bitsize == 32 cannot overflow when UintBiggest is u32.
-    let mask_u64: u64 = if bitsize >= 64 {
-        u64::MAX
-    } else {
-        (1u64 << bitsize) - 1
-    };
+    let mask_u64: u64 = if bitsize >= 64 { u64::MAX } else { (1u64 << bitsize) - 1 };
     let mask = mask_u64 as UintBiggest;
     let masked = shifted & mask;
 
@@ -797,16 +770,25 @@ const fn sign_extend_64(val: u64, bitsize: u32) -> i64 {
 mod tests {
     use super::*;
     use crate::datalogging::types::{
-        AnyValAndTypePair, Configuration, LoggableItem, Operand, SupportedTriggerConditions,
-        TriggerConfig, MAX_OPERANDS,
+        AnyValAndTypePair, Configuration, LoggableItem, Operand, SupportedTriggerConditions, TriggerConfig,
+        MAX_OPERANDS,
     };
     use crate::timebase::Timebase;
     use crate::types::{AnyType, RuntimePublishedValue, VariableType};
 
     static TEST_RPVS: [RuntimePublishedValue; 3] = [
-        RuntimePublishedValue { id: 0x1234, var_type: VariableType::Uint32 },
-        RuntimePublishedValue { id: 0x5678, var_type: VariableType::Float32 },
-        RuntimePublishedValue { id: 0x1000, var_type: VariableType::Uint32 },
+        RuntimePublishedValue {
+            id: 0x1234,
+            var_type: VariableType::Uint32,
+        },
+        RuntimePublishedValue {
+            id: 0x5678,
+            var_type: VariableType::Float32,
+        },
+        RuntimePublishedValue {
+            id: 0x1000,
+            var_type: VariableType::Uint32,
+        },
     ];
 
     struct TestHost {
@@ -818,7 +800,9 @@ mod tests {
             core::ptr::copy_nonoverlapping(src, dst, count);
             true
         }
-        fn is_rpv_read_configured(&self) -> bool { true }
+        fn is_rpv_read_configured(&self) -> bool {
+            true
+        }
         fn rpv_exists(&self, id: u16) -> bool {
             TEST_RPVS.iter().any(|r| r.id == id)
         }
@@ -835,8 +819,14 @@ mod tests {
 
     fn rpv_read_callback(rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
         match (rpv.id, rpv.var_type) {
-            (0x1234, VariableType::Uint32) => { out.uint32 = 0xaabb_ccdd; true }
-            (0x5678, VariableType::Float32) => { out.float32 = 3.141_592_6_f32; true }
+            (0x1234, VariableType::Uint32) => {
+                out.uint32 = 0xaabb_ccdd;
+                true
+            }
+            (0x5678, VariableType::Float32) => {
+                out.float32 = 3.141_592_6_f32;
+                true
+            }
             (0x1000, VariableType::Uint32) => {
                 out.uint32 = RPV_1000_VAL.load(core::sync::atomic::Ordering::Relaxed);
                 true
@@ -854,7 +844,10 @@ mod tests {
     }
 
     fn memory_operand_f32(addr: *const f32) -> Operand {
-        Operand::Var { addr: addr.cast(), datatype: VariableType::Float32 }
+        Operand::Var {
+            addr: addr.cast(),
+            datatype: VariableType::Float32,
+        }
     }
 
     fn literal_operand(val: f32) -> Operand {
@@ -1202,8 +1195,7 @@ mod tests {
 
         for idx in 1..entry_count {
             let ts_cur = u32::from_be_bytes(out_buf[idx * 4..idx * 4 + 4].try_into().unwrap());
-            let ts_prev =
-                u32::from_be_bytes(out_buf[(idx - 1) * 4..(idx - 1) * 4 + 4].try_into().unwrap());
+            let ts_prev = u32::from_be_bytes(out_buf[(idx - 1) * 4..(idx - 1) * 4 + 4].try_into().unwrap());
             assert_eq!(
                 ts_cur.wrapping_sub(ts_prev),
                 5,
@@ -1321,7 +1313,9 @@ mod tests {
                 assert!(!enc.reader_error());
                 let n = enc.reader_read_chunk(&mut out_buf[copied..]);
                 copied += n;
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
             }
 
             assert!(
@@ -1375,8 +1369,7 @@ mod tests {
             // Verify trigger position.
             let lp_after = dl.log_points_after_trigger();
             let trigger_location = entry_count.saturating_sub(lp_after);
-            let expected_trigger_loc =
-                ((probe_location as f64 / 255.0) * (entry_count as f64 - 1.0)).round() as usize;
+            let expected_trigger_loc = ((probe_location as f64 / 255.0) * (entry_count as f64 - 1.0)).round() as usize;
 
             let diff = if trigger_location >= expected_trigger_loc {
                 trigger_location - expected_trigger_loc
@@ -1414,8 +1407,14 @@ mod tests {
     // ── fetch_operand tests (from datalogging_fetch_operands.rs) ─────────────
 
     static FETCH_TEST_RPVS: [RuntimePublishedValue; 2] = [
-        RuntimePublishedValue { id: 0x1234, var_type: VariableType::Uint32 },
-        RuntimePublishedValue { id: 0x5678, var_type: VariableType::Float32 },
+        RuntimePublishedValue {
+            id: 0x1234,
+            var_type: VariableType::Uint32,
+        },
+        RuntimePublishedValue {
+            id: 0x5678,
+            var_type: VariableType::Float32,
+        },
     ];
 
     struct FetchTestHost;
@@ -1425,7 +1424,9 @@ mod tests {
             core::ptr::copy_nonoverlapping(src, dst, count);
             true
         }
-        fn is_rpv_read_configured(&self) -> bool { true }
+        fn is_rpv_read_configured(&self) -> bool {
+            true
+        }
         fn rpv_exists(&self, id: u16) -> bool {
             FETCH_TEST_RPVS.iter().any(|r| r.id == id)
         }
@@ -1434,8 +1435,14 @@ mod tests {
         }
         fn read_rpv(&self, rpv: RuntimePublishedValue, out: &mut AnyType) -> bool {
             match (rpv.id, rpv.var_type) {
-                (0x1234, VariableType::Uint32) => { out.uint32 = 0xaabb_ccdd; true }
-                (0x5678, VariableType::Float32) => { out.float32 = 3.141_592_6_f32; true }
+                (0x1234, VariableType::Uint32) => {
+                    out.uint32 = 0xaabb_ccdd;
+                    true
+                }
+                (0x5678, VariableType::Float32) => {
+                    out.float32 = 3.141_592_6_f32;
+                    true
+                }
                 _ => false,
             }
         }
@@ -1455,7 +1462,10 @@ mod tests {
     fn fetch_var() {
         let host = FetchTestHost;
         let my_var: f32 = 3.141_592_6_f32;
-        let op = Operand::Var { addr: (&raw const my_var).cast(), datatype: VariableType::Float32 };
+        let op = Operand::Var {
+            addr: (&raw const my_var).cast(),
+            datatype: VariableType::Float32,
+        };
         let mut out = AnyValAndTypePair::DEFAULT;
         assert!(fetch_operand(&host, &op, &mut out));
         assert_eq!(out.valtype, VariableType::Float32);
@@ -1509,8 +1519,14 @@ mod tests {
     fn fetch_var_boolean_behaves_as_boolean8() {
         let host = FetchTestHost;
         let v: u8 = 1;
-        let op_b = Operand::Var { addr: &raw const v, datatype: VariableType::Boolean };
-        let op_b8 = Operand::Var { addr: &raw const v, datatype: VariableType::Boolean8 };
+        let op_b = Operand::Var {
+            addr: &raw const v,
+            datatype: VariableType::Boolean,
+        };
+        let op_b8 = Operand::Var {
+            addr: &raw const v,
+            datatype: VariableType::Boolean8,
+        };
 
         let mut out_b = AnyValAndTypePair::DEFAULT;
         let mut out_b8 = AnyValAndTypePair::DEFAULT;
@@ -1592,7 +1608,9 @@ mod tests {
 
         // Float32 → unchanged
         pair.valtype = VariableType::Float32;
-        pair.val = AnyType { float32: 3.141_592_6_f32 };
+        pair.val = AnyType {
+            float32: 3.141_592_6_f32,
+        };
         convert_to_compare_type(&mut pair);
         assert_eq!(pair.valtype, VariableType::Float32);
         assert_eq!(unsafe { pair.val.float32 }, 3.141_592_6_f32);
@@ -1600,20 +1618,26 @@ mod tests {
         #[cfg(feature = "support_64bits")]
         {
             pair.valtype = VariableType::Uint64;
-            pair.val = AnyType { uint64: 0x0001_2345_6789_abcd };
+            pair.val = AnyType {
+                uint64: 0x0001_2345_6789_abcd,
+            };
             convert_to_compare_type(&mut pair);
             assert_eq!(pair.valtype, BIGGEST_UINT);
             assert_eq!(crate::tools::read_biggest_uint(&pair.val), 0x0001_2345_6789_abcd_u64);
 
             pair.valtype = VariableType::Sint64;
-            pair.val = AnyType { sint64: -0x0001_2345_6789_abcd };
+            pair.val = AnyType {
+                sint64: -0x0001_2345_6789_abcd,
+            };
             convert_to_compare_type(&mut pair);
             assert_eq!(pair.valtype, BIGGEST_SINT);
             assert_eq!(crate::tools::read_biggest_sint(&pair.val), -0x0001_2345_6789_abcd_i64);
 
             // Float64 → truncated to Float32
             pair.valtype = VariableType::Float64;
-            pair.val = AnyType { float64: f64::from(3.141_592_6_f32) };
+            pair.val = AnyType {
+                float64: f64::from(3.141_592_6_f32),
+            };
             convert_to_compare_type(&mut pair);
             assert_eq!(pair.valtype, VariableType::Float32);
             assert_eq!(unsafe { pair.val.float32 }, 3.141_592_6_f32);
@@ -1707,21 +1731,41 @@ mod tests {
 
         let mut out = AnyType { uint32: 0 };
 
-        assert!(fetch_variable(&host, &raw const some_buffer[f32_offset], VariableType::Float32, &mut out));
+        assert!(fetch_variable(
+            &host,
+            &raw const some_buffer[f32_offset],
+            VariableType::Float32,
+            &mut out
+        ));
         assert_eq!(unsafe { out.float32 }, f32_val);
 
         #[cfg(feature = "support_64bits")]
         {
             let f64_val: f64 = 3.141_592_6;
             some_buffer[f64_offset..f64_offset + 8].copy_from_slice(&f64_val.to_ne_bytes());
-            assert!(fetch_variable(&host, &raw const some_buffer[f64_offset], VariableType::Float64, &mut out));
+            assert!(fetch_variable(
+                &host,
+                &raw const some_buffer[f64_offset],
+                VariableType::Float64,
+                &mut out
+            ));
             assert_eq!(unsafe { out.float64 }, f64_val);
         }
 
-        assert!(fetch_variable(&host, &raw const some_buffer[u16_offset], VariableType::Uint16, &mut out));
+        assert!(fetch_variable(
+            &host,
+            &raw const some_buffer[u16_offset],
+            VariableType::Uint16,
+            &mut out
+        ));
         assert_eq!(unsafe { out.uint16 }, u16_val);
 
-        assert!(fetch_variable(&host, &raw const some_buffer[bool_offset], VariableType::Boolean, &mut out));
+        assert!(fetch_variable(
+            &host,
+            &raw const some_buffer[bool_offset],
+            VariableType::Boolean,
+            &mut out
+        ));
         assert_eq!(unsafe { out.boolean }, b_val);
     }
 

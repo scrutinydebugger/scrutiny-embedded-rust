@@ -8,8 +8,8 @@ pub use datalogger::{convert_to_compare_type, DataLogger, State};
 pub(crate) use raw_encoder::RawFormatEncoder;
 pub use trigger::{active_condition_for, ActiveCondition, ConditionSharedData};
 pub use types::{
-    AnyValAndTypePair, Configuration, EncodingType, LoggableItem, Operand,
-    SupportedTriggerConditions, TriggerConfig, MAX_OPERANDS,
+    AnyValAndTypePair, Configuration, EncodingType, LoggableItem, Operand, SupportedTriggerConditions, TriggerConfig,
+    MAX_OPERANDS,
 };
 
 // ── DataLoggerCell ────────────────────────────────────────────────────────────

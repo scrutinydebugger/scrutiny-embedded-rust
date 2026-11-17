@@ -26,7 +26,12 @@ pub struct Request {
 
 impl Request {
     pub(super) const fn new() -> Self {
-        Self { command_id: 0, subfunction_id: 0, data_length: 0, crc: 0 }
+        Self {
+            command_id: 0,
+            subfunction_id: 0,
+            data_length: 0,
+            crc: 0,
+        }
     }
 
     pub(super) const fn reset(&mut self) {
@@ -49,7 +54,13 @@ pub struct Response {
 
 impl Response {
     pub(super) const fn new() -> Self {
-        Self { command_id: 0, subfunction_id: 0, response_code: 0, data_length: 0, crc: 0 }
+        Self {
+            command_id: 0,
+            subfunction_id: 0,
+            response_code: 0,
+            data_length: 0,
+            crc: 0,
+        }
     }
 
     pub const fn reset(&mut self) {

@@ -31,10 +31,7 @@ pub enum Operand {
     /// A literal floating-point constant.
     Literal(f32),
     /// A variable read from a memory address with a given type.
-    Var {
-        addr: *const u8,
-        datatype: VariableType,
-    },
+    Var { addr: *const u8, datatype: VariableType },
     /// A bitfield extracted from a variable at a memory address.
     VarBit {
         addr: *const u8,
@@ -86,7 +83,6 @@ impl TryFrom<u8> for SupportedTriggerConditions {
         }
     }
 }
-
 
 /// Trigger configuration, including the condition and its operands.
 #[derive(Clone, Copy)]

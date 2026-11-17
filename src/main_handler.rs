@@ -2,17 +2,17 @@ use crate::build_config;
 use crate::config::{Config, RpvReadCallback, RpvWriteCallback, UserCommandCallback};
 use crate::loop_handler::LoopHandler;
 use crate::protocol::codec_v1_0;
+#[cfg(feature = "protected_regions")]
+use crate::protocol::definitions::MemoryRegionType;
 use crate::protocol::definitions::{
     CommControlSubfn, CommandId, GetInfoSubfn, MemoryControlSubfn, ResponseCode, CONNECT_MAGIC,
 };
-#[cfg(feature = "protected_regions")]
-use crate::protocol::definitions::MemoryRegionType;
 use crate::protocol::CommHandler;
 use crate::timebase::Timebase;
 use crate::tools::is_supported_type;
-use crate::types::{RuntimePublishedValue, Timediff, Timestamp};
 #[cfg(feature = "datalogging")]
 use crate::types::AnyType;
+use crate::types::{RuntimePublishedValue, Timediff, Timestamp};
 
 #[cfg(feature = "protected_regions")]
 use crate::types::AddressRange;
@@ -391,8 +391,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         if self.datalogger_cell.is_none() {
             return false;
         }
-        matches!(self.dl.cached_state, DlState::Error)
-            || !matches!(self.dl.error, DataloggingError::None)
+        matches!(self.dl.cached_state, DlState::Error) || !matches!(self.dl.error, DataloggingError::None)
     }
 
     /// Returns `true` if a loop currently owns the datalogger.
@@ -489,7 +488,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                         let cell_addr = core::ptr::from_ref::<DataLoggerCell>(cell) as usize;
                         loop_handler.main2loop().send(Main2LoopMsg::TakeOwnership {
                             cell_addr,
-                            rpvs:        self.rpvs,
+                            rpvs: self.rpvs,
                             rpv_read_cb: self.rpv_read_callback,
                         });
                         self.dl.pending_new_owner = None;
@@ -1054,7 +1053,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         subfn_id: u8,
         data: &[u8],
     ) -> ResponseCode {
-        let host = RpvHost { rpvs, rpv_read_callback };
+        let host = RpvHost {
+            rpvs,
+            rpv_read_callback,
+        };
 
         let code = match DataLogControlSubfn::try_from(subfn_id) {
             Err(()) => return ResponseCode::UnsupportedFeature,
@@ -1064,7 +1066,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 let encoding = crate::datalogging::RawFormatEncoder::get_encoding();
                 let max_signals = u8::try_from(crate::build_config::DATALOGGING_MAX_SIGNAL).unwrap_or(u8::MAX);
                 match encode_response_datalogging_get_setup(buf_size, encoding, max_signals, tx_buf) {
-                    Ok(len) => { comm.active_response_mut().data_length = len; ResponseCode::Ok }
+                    Ok(len) => {
+                        comm.active_response_mut().data_length = len;
+                        ResponseCode::Ok
+                    }
                     Err(e) => e,
                 }
             }
@@ -1085,27 +1090,43 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 let parse_result = decode_datalogging_configure_request(data, dl_obj.config_mut());
                 let (loop_id, config_id) = match parse_result {
                     Ok(ids) => ids,
-                    Err(e) => { dl_obj.reset(); return e; }
+                    Err(e) => {
+                        dl_obj.reset();
+                        return e;
+                    }
                 };
 
-                let Some(loop_slice) = loops else { dl_obj.reset(); return ResponseCode::FailureToProceed; };
-                if loop_id as usize >= loop_slice.len() { dl_obj.reset(); return ResponseCode::FailureToProceed; }
-                if !loop_slice[loop_id as usize].datalogging_allowed() { dl_obj.reset(); return ResponseCode::Forbidden; }
+                let Some(loop_slice) = loops else {
+                    dl_obj.reset();
+                    return ResponseCode::FailureToProceed;
+                };
+                if loop_id as usize >= loop_slice.len() {
+                    dl_obj.reset();
+                    return ResponseCode::FailureToProceed;
+                }
+                if !loop_slice[loop_id as usize].datalogging_allowed() {
+                    dl_obj.reset();
+                    return ResponseCode::Forbidden;
+                }
 
                 // Validate forbidden regions for Var/VarBit operands and Memory items.
                 #[cfg(feature = "protected_regions")]
                 if let Some(forbidden) = forbidden_ranges {
-                    use crate::datalogging::types::{Operand, LoggableItem};
+                    use crate::datalogging::types::{LoggableItem, Operand};
                     use crate::tools::TypeSize;
                     let config = dl_obj.config_ref();
                     let mut region_err = false;
                     'outer: for i in 0..config.trigger.operand_count as usize {
                         let touches = match config.trigger.operands[i] {
-                            Operand::Var { addr, datatype } | Operand::VarBit { addr, datatype, .. } =>
-                                codec_v1_0::region_overlaps(addr as usize, datatype.type_size() as usize, forbidden),
+                            Operand::Var { addr, datatype } | Operand::VarBit { addr, datatype, .. } => {
+                                codec_v1_0::region_overlaps(addr as usize, datatype.type_size() as usize, forbidden)
+                            }
                             _ => false,
                         };
-                        if touches { region_err = true; break 'outer; }
+                        if touches {
+                            region_err = true;
+                            break 'outer;
+                        }
                     }
                     if !region_err {
                         for i in 0..config.items_count as usize {
@@ -1117,14 +1138,17 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                             }
                         }
                     }
-                    if region_err { dl_obj.reset(); return ResponseCode::Forbidden; }
+                    if region_err {
+                        dl_obj.reset();
+                        return ResponseCode::Forbidden;
+                    }
                 }
 
                 // Validate RPV existence for Rpv operands and Rpv loggable items.
                 // Mirrors C++: RPV-not-found returns FailureToProceed (distinct from InvalidRequest
                 // for malformed payload / invalid condition).
                 {
-                    use crate::datalogging::types::{Operand, LoggableItem};
+                    use crate::datalogging::types::{LoggableItem, Operand};
                     let config = dl_obj.config_ref();
                     let mut rpv_err = false;
                     for i in 0..config.trigger.operand_count as usize {
@@ -1145,7 +1169,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                             }
                         }
                     }
-                    if rpv_err { dl_obj.reset(); return ResponseCode::FailureToProceed; }
+                    if rpv_err {
+                        dl_obj.reset();
+                        return ResponseCode::FailureToProceed;
+                    }
                 }
 
                 dl_obj.configure(config_id, &host);
@@ -1180,7 +1207,10 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 let bytes = u32::try_from(dl.cached_bytes_to_complete).unwrap_or(u32::MAX);
                 let counter = u32::try_from(dl.cached_write_counter).unwrap_or(u32::MAX);
                 match encode_response_datalogging_get_status(state, bytes, counter, tx_buf) {
-                    Ok(len) => { comm.active_response_mut().data_length = len; ResponseCode::Ok }
+                    Ok(len) => {
+                        comm.active_response_mut().data_length = len;
+                        ResponseCode::Ok
+                    }
                     Err(e) => e,
                 }
             }
@@ -1206,9 +1236,17 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                 let data_size = u32::try_from(dl_obj.get_encoder().reader_total_size()).unwrap_or(u32::MAX);
                 let after_trigger = u32::try_from(dl_obj.log_points_after_trigger()).unwrap_or(u32::MAX);
                 match encode_response_datalogging_get_acquisition_metadata(
-                    acq_id, config_id, entry_count, data_size, after_trigger, tx_buf,
+                    acq_id,
+                    config_id,
+                    entry_count,
+                    data_size,
+                    after_trigger,
+                    tx_buf,
                 ) {
-                    Ok(len) => { comm.active_response_mut().data_length = len; ResponseCode::Ok }
+                    Ok(len) => {
+                        comm.active_response_mut().data_length = len;
+                        ResponseCode::Ok
+                    }
                     Err(e) => e,
                 }
             }

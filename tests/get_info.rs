@@ -2,9 +2,7 @@ use scrutiny_embedded_rust::build_config::{PROTOCOL_VERSION_MAJOR, PROTOCOL_VERS
 use scrutiny_embedded_rust::config::Config;
 use scrutiny_embedded_rust::loop_handler::{FixedFreqLoopHandler, LoopHandler, LoopType, VariableFreqLoopHandler};
 use scrutiny_embedded_rust::main_handler::MainHandler;
-use scrutiny_embedded_rust::protocol::{
-    CommandId, CommControlSubfn, GetInfoSubfn, ResponseCode, CONNECT_MAGIC,
-};
+use scrutiny_embedded_rust::protocol::{CommControlSubfn, CommandId, GetInfoSubfn, ResponseCode, CONNECT_MAGIC};
 use scrutiny_embedded_rust::software_id::SOFTWARE_ID;
 use scrutiny_embedded_rust::tools::crc32;
 use scrutiny_embedded_rust::types::{AnyType, RuntimePublishedValue, VariableType};
@@ -42,7 +40,11 @@ fn send_and_recv(h: &mut MainHandler<'_, '_>, req: &[u8]) -> Vec<u8> {
 }
 
 fn connect(h: &mut MainHandler<'_, '_>) {
-    let req = make_request(CommandId::CommControl as u8, CommControlSubfn::Connect as u8, &CONNECT_MAGIC);
+    let req = make_request(
+        CommandId::CommControl as u8,
+        CommControlSubfn::Connect as u8,
+        &CONNECT_MAGIC,
+    );
     h.receive_data(&req);
     h.process(0);
     let n = h.data_to_send() as usize;
@@ -184,7 +186,11 @@ fn test_special_memory_region_count_no_regions() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    let req = make_request(CommandId::GetInfo as u8, GetInfoSubfn::GetSpecialMemoryRegionCount as u8, &[]);
+    let req = make_request(
+        CommandId::GetInfo as u8,
+        GetInfoSubfn::GetSpecialMemoryRegionCount as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -198,11 +204,19 @@ fn test_special_memory_region_count_no_regions() {
 #[test]
 fn test_special_memory_region_count_with_regions() {
     static READONLY: [AddressRange; 2] = [
-        AddressRange { start: 0x1000 as *const u8, end: 0x1004 as *const u8 },
-        AddressRange { start: 0x1001 as *const u8, end: 0x1005 as *const u8 },
+        AddressRange {
+            start: 0x1000 as *const u8,
+            end: 0x1004 as *const u8,
+        },
+        AddressRange {
+            start: 0x1001 as *const u8,
+            end: 0x1005 as *const u8,
+        },
     ];
-    static FORBIDDEN: [AddressRange; 1] =
-        [AddressRange { start: 0x1002 as *const u8, end: 0x1006 as *const u8 }];
+    static FORBIDDEN: [AddressRange; 1] = [AddressRange {
+        start: 0x1002 as *const u8,
+        end: 0x1006 as *const u8,
+    }];
 
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
@@ -213,7 +227,11 @@ fn test_special_memory_region_count_with_regions() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    let req = make_request(CommandId::GetInfo as u8, GetInfoSubfn::GetSpecialMemoryRegionCount as u8, &[]);
+    let req = make_request(
+        CommandId::GetInfo as u8,
+        GetInfoSubfn::GetSpecialMemoryRegionCount as u8,
+        &[],
+    );
     let resp = send_and_recv(&mut h, &req);
 
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
@@ -229,11 +247,19 @@ fn test_special_memory_region_count_with_regions() {
 #[test]
 fn test_special_memory_region_location() {
     static READONLY: [AddressRange; 2] = [
-        AddressRange { start: 0x1000 as *const u8, end: 0x1004 as *const u8 },
-        AddressRange { start: 0x1001 as *const u8, end: 0x1005 as *const u8 },
+        AddressRange {
+            start: 0x1000 as *const u8,
+            end: 0x1004 as *const u8,
+        },
+        AddressRange {
+            start: 0x1001 as *const u8,
+            end: 0x1005 as *const u8,
+        },
     ];
-    static FORBIDDEN: [AddressRange; 1] =
-        [AddressRange { start: 0x1002 as *const u8, end: 0x1006 as *const u8 }];
+    static FORBIDDEN: [AddressRange; 1] = [AddressRange {
+        start: 0x1002 as *const u8,
+        end: 0x1006 as *const u8,
+    }];
 
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
@@ -274,8 +300,16 @@ fn test_special_memory_region_location() {
 
         let start_bytes = expected_start.to_be_bytes();
         let end_bytes = expected_end.to_be_bytes();
-        assert_eq!(&p[2..2 + addr_size], &start_bytes[..], "type={region_type} index={region_index} start mismatch");
-        assert_eq!(&p[2 + addr_size..2 + 2 * addr_size], &end_bytes[..], "type={region_type} index={region_index} end mismatch");
+        assert_eq!(
+            &p[2..2 + addr_size],
+            &start_bytes[..],
+            "type={region_type} index={region_index} start mismatch"
+        );
+        assert_eq!(
+            &p[2 + addr_size..2 + 2 * addr_size],
+            &end_bytes[..],
+            "type={region_type} index={region_index} end mismatch"
+        );
     }
 }
 
@@ -283,11 +317,19 @@ fn test_special_memory_region_location() {
 #[test]
 fn test_special_memory_region_location_wrong_index() {
     static READONLY: [AddressRange; 2] = [
-        AddressRange { start: 0x1000 as *const u8, end: 0x1004 as *const u8 },
-        AddressRange { start: 0x1001 as *const u8, end: 0x1005 as *const u8 },
+        AddressRange {
+            start: 0x1000 as *const u8,
+            end: 0x1004 as *const u8,
+        },
+        AddressRange {
+            start: 0x1001 as *const u8,
+            end: 0x1005 as *const u8,
+        },
     ];
-    static FORBIDDEN: [AddressRange; 1] =
-        [AddressRange { start: 0x1002 as *const u8, end: 0x1006 as *const u8 }];
+    static FORBIDDEN: [AddressRange; 1] = [AddressRange {
+        start: 0x1002 as *const u8,
+        end: 0x1006 as *const u8,
+    }];
 
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
@@ -321,9 +363,18 @@ fn rpv_write_cb(_rpv: RuntimePublishedValue, _in: &AnyType) -> bool {
 #[test]
 fn test_rpv_count() {
     static RPVS: [RuntimePublishedValue; 3] = [
-        RuntimePublishedValue { id: 0x1122, var_type: VariableType::Uint32 },
-        RuntimePublishedValue { id: 0x3344, var_type: VariableType::Float32 },
-        RuntimePublishedValue { id: 0x5566, var_type: VariableType::Uint16 },
+        RuntimePublishedValue {
+            id: 0x1122,
+            var_type: VariableType::Uint32,
+        },
+        RuntimePublishedValue {
+            id: 0x3344,
+            var_type: VariableType::Float32,
+        },
+        RuntimePublishedValue {
+            id: 0x5566,
+            var_type: VariableType::Uint16,
+        },
     ];
 
     let mut rx = [0u8; 128];
@@ -352,11 +403,23 @@ fn test_rpv_count() {
 #[test]
 fn test_rpv_definition() {
     static RPVS: [RuntimePublishedValue; 4] = [
-        RuntimePublishedValue { id: 0x1122, var_type: VariableType::Uint32 },
-        RuntimePublishedValue { id: 0x3344, var_type: VariableType::Float32 },
-        RuntimePublishedValue { id: 0x5566, var_type: VariableType::Uint16 },
+        RuntimePublishedValue {
+            id: 0x1122,
+            var_type: VariableType::Uint32,
+        },
+        RuntimePublishedValue {
+            id: 0x3344,
+            var_type: VariableType::Float32,
+        },
+        RuntimePublishedValue {
+            id: 0x5566,
+            var_type: VariableType::Uint16,
+        },
         // Boolean is mapped to Boolean8 by the protocol encoder.
-        RuntimePublishedValue { id: 0x7788, var_type: VariableType::Boolean },
+        RuntimePublishedValue {
+            id: 0x7788,
+            var_type: VariableType::Boolean,
+        },
     ];
 
     let mut rx = [0u8; 128];
@@ -398,9 +461,18 @@ fn test_rpv_definition() {
 #[test]
 fn test_rpv_definition_overflow() {
     static RPVS: [RuntimePublishedValue; 3] = [
-        RuntimePublishedValue { id: 0x1122, var_type: VariableType::Uint32 },
-        RuntimePublishedValue { id: 0x3344, var_type: VariableType::Float32 },
-        RuntimePublishedValue { id: 0x5566, var_type: VariableType::Uint16 },
+        RuntimePublishedValue {
+            id: 0x1122,
+            var_type: VariableType::Uint32,
+        },
+        RuntimePublishedValue {
+            id: 0x3344,
+            var_type: VariableType::Float32,
+        },
+        RuntimePublishedValue {
+            id: 0x5566,
+            var_type: VariableType::Uint16,
+        },
     ];
 
     let mut rx = [0u8; 128];
@@ -496,7 +568,10 @@ fn test_loop_definition_fixed_freq() {
     // Wire: loop_id(1) + type(1) + attributes(1) + timestep_100ns(4) + name_len(1) + name
     assert_eq!(p[0], 0, "loop ID");
     assert_eq!(p[1], LoopType::FixedFreq as u8, "loop type");
-    assert_eq!(p[2], DATALOGGING_ALLOWED_ATTR, "attributes (datalogging enabled by default)");
+    assert_eq!(
+        p[2], DATALOGGING_ALLOWED_ATTR,
+        "attributes (datalogging enabled by default)"
+    );
     let timestep = u32::from_be_bytes([p[3], p[4], p[5], p[6]]);
     assert_eq!(timestep, 0x12345678u32, "timestep_100ns");
     let name_len = p[7] as usize;
@@ -522,7 +597,10 @@ fn test_loop_definition_variable_freq() {
     // Wire: loop_id(1) + type(1) + attributes(1) + name_len(1) + name  (no timestep for variable freq)
     assert_eq!(p[0], 1, "loop ID");
     assert_eq!(p[1], LoopType::VariableFreq as u8, "loop type");
-    assert_eq!(p[2], DATALOGGING_ALLOWED_ATTR, "attributes (datalogging enabled by default)");
+    assert_eq!(
+        p[2], DATALOGGING_ALLOWED_ATTR,
+        "attributes (datalogging enabled by default)"
+    );
     let name_len = p[3] as usize;
     assert_eq!(name_len, 5, "name length");
     assert_eq!(&p[4..4 + name_len], b"Loop2");

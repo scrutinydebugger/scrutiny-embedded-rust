@@ -23,7 +23,12 @@ fn main() {
     let mut out = String::new();
     writeln!(out, "pub const COMM_RX_TIMEOUT_US: u32 = {};", sep(rx_timeout)).unwrap();
     writeln!(out, "pub const COMM_HEARTBEAT_TIMEOUT_US: u32 = {};", sep(hb_timeout)).unwrap();
-    writeln!(out, "pub const REQUEST_MAX_PROCESS_TIME_US: u32 = {};", sep(max_process_time)).unwrap();
+    writeln!(
+        out,
+        "pub const REQUEST_MAX_PROCESS_TIME_US: u32 = {};",
+        sep(max_process_time)
+    )
+    .unwrap();
     writeln!(out, "pub const PROTOCOL_VERSION_MAJOR: u8 = {proto_major}_u8;").unwrap();
     writeln!(out, "pub const PROTOCOL_VERSION_MINOR: u8 = {proto_minor}_u8;").unwrap();
     writeln!(out, "#[cfg(feature = \"datalogging\")]").unwrap();

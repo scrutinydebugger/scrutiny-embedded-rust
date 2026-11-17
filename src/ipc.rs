@@ -108,7 +108,10 @@ impl<T: Copy> IpcMessage<T, StdAtomicFlag> {
     /// heap allocator. Custom platforms should provide their own analogous constructor.
     #[must_use]
     pub const fn new_std(init: T) -> Self {
-        Self { data: UnsafeCell::new(init), flag: StdAtomicFlag::new(false) }
+        Self {
+            data: UnsafeCell::new(init),
+            flag: StdAtomicFlag::new(false),
+        }
     }
 }
 
@@ -118,7 +121,10 @@ impl<T: Copy> IpcMessage<T, LoopIpcFlag> {
     /// Creates a new `IpcMessage` backed by `LoopIpcFlag`, for the loop IPC channels.
     #[must_use]
     pub(crate) const fn new_loop(init: T) -> Self {
-        Self { data: UnsafeCell::new(init), flag: LoopIpcFlag::new(false) }
+        Self {
+            data: UnsafeCell::new(init),
+            flag: LoopIpcFlag::new(false),
+        }
     }
 }
 
@@ -130,8 +136,8 @@ impl<T: Copy> IpcMessage<T, LoopIpcFlag> {
 pub enum Main2LoopMsg {
     /// `cell_addr` is the `*const DataLoggerCell` cast to `usize` to stay `Send`.
     TakeOwnership {
-        cell_addr:   usize,
-        rpvs:        Option<&'static [crate::types::RuntimePublishedValue]>,
+        cell_addr: usize,
+        rpvs: Option<&'static [crate::types::RuntimePublishedValue]>,
         rpv_read_cb: Option<crate::config::RpvReadCallback>,
     },
     ReleaseOwnership,
@@ -240,7 +246,10 @@ mod tests {
             }
         }
 
-        let msg = IpcMessage { data: UnsafeCell::new(99u8), flag: MyFlag::new() };
+        let msg = IpcMessage {
+            data: UnsafeCell::new(99u8),
+            flag: MyFlag::new(),
+        };
         assert_eq!(msg.pop(), None);
         msg.send(7u8);
         assert_eq!(msg.pop(), Some(7u8));

@@ -687,6 +687,62 @@ fn test_configure_unknown_condition() {
     assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8);
 }
 
+// boolean16/32/64 (0x31-0x33) are not supported. A Var operand using them must be rejected.
+#[test]
+fn test_configure_operand_var_sized_boolean_rejected() {
+    static LOOPS_VAR_SIZED_BOOL: [LoopHandler; 3] = [
+        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
+        LoopHandler::variable_freq("Loop2").with_datalogging(),
+        LoopHandler::fixed_freq("Loop3", 100),
+    ];
+    static mut DL_BUF_VAR_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    let mut rx = [0u8; 256];
+    let mut tx = [0u8; 128];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_VAR_SIZED_BOOL).cast(), DATALOG_BUFFER_SIZE, &LOOPS_VAR_SIZED_BOOL);
+    connect(&mut h);
+
+    for datatype in [0x31u8, 0x32, 0x33] {
+        let mut cfg = get_valid_reference_config();
+        cfg.operands[1] = DlOperand::Var {
+            addr: core::ptr::addr_of!(SOME_VAR_OPERAND1) as usize,
+            datatype,
+        };
+        let resp = send_configure(&mut h, &cfg);
+        h.process(0);
+        assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8, "datatype={datatype:#x}");
+        assert_ne!(get_status_state(&mut h), DlState::Configured as u8, "datatype={datatype:#x}");
+    }
+}
+
+// boolean16/32/64 (0x31-0x33) are not supported. A VarBit operand using them must be rejected.
+#[test]
+fn test_configure_operand_varbit_sized_boolean_rejected() {
+    static LOOPS_VARBIT_SIZED_BOOL: [LoopHandler; 3] = [
+        LoopHandler::fixed_freq("Loop1", 100).with_datalogging(),
+        LoopHandler::variable_freq("Loop2").with_datalogging(),
+        LoopHandler::fixed_freq("Loop3", 100),
+    ];
+    static mut DL_BUF_VARBIT_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    let mut rx = [0u8; 256];
+    let mut tx = [0u8; 128];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, core::ptr::addr_of_mut!(DL_BUF_VARBIT_SIZED_BOOL).cast(), DATALOG_BUFFER_SIZE, &LOOPS_VARBIT_SIZED_BOOL);
+    connect(&mut h);
+
+    for datatype in [0x31u8, 0x32, 0x33] {
+        let mut cfg = get_valid_reference_config();
+        cfg.operands[1] = DlOperand::VarBit {
+            addr: core::ptr::addr_of!(SOME_VAR_OPERAND1) as usize,
+            datatype,
+            bitoffset: 0,
+            bitsize: 1,
+        };
+        let resp = send_configure(&mut h, &cfg);
+        h.process(0);
+        assert_eq!(resp_code(&resp), ResponseCode::InvalidRequest as u8, "datatype={datatype:#x}");
+        assert_ne!(get_status_state(&mut h), DlState::Configured as u8, "datatype={datatype:#x}");
+    }
+}
+
 #[test]
 fn test_configure_loggable_bad_rpv() {
     static LOOPS_LOGGABLE_BAD_RPV: [LoopHandler; 3] = [

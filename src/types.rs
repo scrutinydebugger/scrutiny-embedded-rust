@@ -30,6 +30,7 @@ pub enum VariableType {
     Uint8 = (VariableTypeType::VTTuint as u8) | (VariableTypeSize::VTS8 as u8),
     Float8 = (VariableTypeType::VTTfloat as u8) | (VariableTypeSize::VTS8 as u8),
     Cfloat8 = (VariableTypeType::VTTcfloat as u8) | (VariableTypeSize::VTS8 as u8),
+    // C++ boolean16/32/64 (0x31-0x33) are not supported because a Rust `bool` is 1 byte; `try_from` rejects them.
     Boolean8 = (VariableTypeType::VTTboolean as u8) | (VariableTypeSize::VTS8 as u8),
     Sint16 = (VariableTypeType::VTTsint as u8) | (VariableTypeSize::VTS16 as u8),
     Uint16 = (VariableTypeType::VTTuint as u8) | (VariableTypeSize::VTS16 as u8),
@@ -147,3 +148,16 @@ pub type Timestamp = u32;
 
 /// A duration or time delta. Units: 100 ns ticks.
 pub type Timediff = u32;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // boolean16/32/64 from the C++ library are not supported and must be rejected.
+    #[test]
+    fn test_try_from_rejects_sized_booleans() {
+        assert_eq!(VariableType::try_from(0x31), Err(()));
+        assert_eq!(VariableType::try_from(0x32), Err(()));
+        assert_eq!(VariableType::try_from(0x33), Err(()));
+    }
+}

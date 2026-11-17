@@ -230,6 +230,7 @@ impl<'rxbuf, 'txbuf> Config<'rxbuf, 'txbuf> {
     /// static FAST: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Fast", 1000);
     /// static SLOW: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Slow");
     /// static LOOPS: [&LoopHandler; 2] = [FAST.handler(), SLOW.handler()];
+    /// // Datalogging is allowed by default; disable it with `.without_datalogging()` on a loop.
     /// // config.set_loops(&LOOPS);
     /// // In the fast task:  FAST.process();
     /// // In the slow task:  SLOW.process_with_time(dt);

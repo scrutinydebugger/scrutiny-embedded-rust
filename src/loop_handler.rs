@@ -114,7 +114,7 @@ impl LoopHandler {
             loop_type: LoopType::FixedFreq,
             timestep_100ns,
             #[cfg(feature = "datalogging")]
-            datalogging_allowed: false,
+            datalogging_allowed: true,
             timebase: UnsafeCell::new(Timebase::new()),
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
@@ -133,7 +133,7 @@ impl LoopHandler {
             loop_type: LoopType::VariableFreq,
             timestep_100ns: 0,
             #[cfg(feature = "datalogging")]
-            datalogging_allowed: false,
+            datalogging_allowed: true,
             timebase: UnsafeCell::new(Timebase::new()),
             #[cfg(feature = "datalogging")]
             dl_runtime: UnsafeCell::new(LoopDlRuntime::DEFAULT),
@@ -144,11 +144,11 @@ impl LoopHandler {
         }
     }
 
-    /// Enables datalogging for this loop.
+    /// Disables datalogging for this loop.
     #[cfg(feature = "datalogging")]
     #[must_use]
-    pub(crate) const fn with_datalogging(mut self) -> Self {
-        self.datalogging_allowed = true;
+    pub(crate) const fn without_datalogging(mut self) -> Self {
+        self.datalogging_allowed = false;
         self
     }
 
@@ -170,7 +170,7 @@ impl LoopHandler {
         self.timestep_100ns
     }
 
-    /// Returns `true` if datalogging is enabled for this loop.
+    /// Returns `true` if datalogging is enabled for this loop (default `true`).
     #[cfg(feature = "datalogging")]
     #[must_use]
     pub const fn datalogging_allowed(&self) -> bool {
@@ -304,11 +304,11 @@ impl FixedFreqLoopHandler {
         Self(LoopHandler::fixed_freq(name, timestep_100ns))
     }
 
-    /// Enables datalogging for this loop.
+    /// Disables datalogging for this loop (enabled by default).
     #[cfg(feature = "datalogging")]
     #[must_use]
-    pub const fn with_datalogging(self) -> Self {
-        Self(self.0.with_datalogging())
+    pub const fn without_datalogging(self) -> Self {
+        Self(self.0.without_datalogging())
     }
 
     /// Returns the shared loop core, to register with `Config::set_loops`.
@@ -338,11 +338,11 @@ impl VariableFreqLoopHandler {
         Self(LoopHandler::variable_freq(name))
     }
 
-    /// Enables datalogging for this loop.
+    /// Disables datalogging for this loop (enabled by default).
     #[cfg(feature = "datalogging")]
     #[must_use]
-    pub const fn with_datalogging(self) -> Self {
-        Self(self.0.with_datalogging())
+    pub const fn without_datalogging(self) -> Self {
+        Self(self.0.without_datalogging())
     }
 
     /// Returns the shared loop core, to register with `Config::set_loops`.
@@ -383,6 +383,21 @@ mod tests {
         assert_eq!(variable.handler().get_timestamp(), 123);
         variable.process_with_time(10);
         assert_eq!(variable.handler().get_timestamp(), 133);
+    }
+
+    // Datalogging is allowed by default and disabled by without_datalogging(), on both loop types.
+    #[cfg(feature = "datalogging")]
+    #[test]
+    fn datalogging_allowed_by_default() {
+        let fixed = FixedFreqLoopHandler::new("F", 100);
+        assert!(fixed.handler().datalogging_allowed());
+        let fixed = fixed.without_datalogging();
+        assert!(!fixed.handler().datalogging_allowed());
+
+        let variable = VariableFreqLoopHandler::new("V");
+        assert!(variable.handler().datalogging_allowed());
+        let variable = variable.without_datalogging();
+        assert!(!variable.handler().datalogging_allowed());
     }
 
     // A loop handler is usable without the datalogging feature.

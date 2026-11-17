@@ -299,7 +299,7 @@ fn make_handler_with_loops<'rx, 'tx>(
 #[test]
 fn test_unsupported() {
     // Handler with no dl buffer — DataLogControl returns UnsupportedFeature for all subfns
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100).with_datalogging();
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100);
     static UNSUP_LOOPS: [&LoopHandler; 1] = [LOOP1.handler()];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
@@ -321,7 +321,7 @@ fn test_unsupported() {
 // Without a datalogging buffer, the state getter reports Idle and no error, like C++.
 #[test]
 fn test_getters_without_datalogging_buffer() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100).with_datalogging();
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100);
     static NO_BUF_LOOPS: [&LoopHandler; 1] = [LOOP1.handler()];
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
@@ -341,7 +341,7 @@ fn test_getters_without_datalogging_buffer() {
 
 #[test]
 fn test_get_setup() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100).with_datalogging();
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100);
     static LOOPS_GET_SETUP: [&LoopHandler; 1] = [LOOP1.handler()];
     static mut DL_BUF_GET_SETUP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
@@ -364,9 +364,9 @@ fn test_get_setup() {
 
 #[test]
 fn test_configure_valid() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_CONFIGURE_VALID: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_CONFIGURE_VALID: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -382,9 +382,9 @@ fn test_configure_valid() {
 
 #[test]
 fn test_configure_bad_loop_id() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_BAD_LOOP: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_BAD_LOOP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -401,9 +401,9 @@ fn test_configure_bad_loop_id() {
 
 #[test]
 fn test_configure_no_datalogging_support() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100); // no datalogging
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging(); // no datalogging
     static LOOPS_NO_DL: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_NO_DL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -420,9 +420,9 @@ fn test_configure_no_datalogging_support() {
 
 #[test]
 fn test_configure_item_count_overflow() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_OVERFLOW: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OVERFLOW: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
@@ -442,9 +442,9 @@ fn test_configure_item_count_overflow() {
 
 #[test]
 fn test_configure_operand_count_overflow() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_OP_OVERFLOW: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OP_OVERFLOW: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
@@ -464,9 +464,9 @@ fn test_configure_operand_count_overflow() {
 
 #[test]
 fn test_configure_operand_count_mismatch() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_OP_MISMATCH: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OP_MISMATCH: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -484,9 +484,9 @@ fn test_configure_operand_count_mismatch() {
 
 #[test]
 fn test_bad_decimation() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_BAD_DEC: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_BAD_DEC: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -503,9 +503,9 @@ fn test_bad_decimation() {
 
 #[test]
 fn test_configure_bad_operands() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_BAD_OP: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_BAD_OP: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -531,9 +531,9 @@ fn test_configure_bad_operands() {
 
 #[test]
 fn test_configure_operand_bad_rpv() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_BAD_RPV: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_BAD_RPV: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -551,9 +551,9 @@ fn test_configure_operand_bad_rpv() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_configure_signal_in_forbidden_region() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_FORBIDDEN_SIG: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_FORBIDDEN_SIG: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     static mut FORBIDDEN_VAR_SIG: u32 = 0;
@@ -586,9 +586,9 @@ fn test_configure_signal_in_forbidden_region() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_configure_operand_var_in_forbidden_region() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_FORBIDDEN_VAR: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_FORBIDDEN_VAR: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     static mut FORBIDDEN_VAR_OP: u32 = 0;
@@ -621,9 +621,9 @@ fn test_configure_operand_var_in_forbidden_region() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_configure_operand_varbit_in_forbidden_region() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_FORBIDDEN_VARBIT: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_FORBIDDEN_VARBIT: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     static mut FORBIDDEN_VAR_VB: u32 = 0;
@@ -658,9 +658,9 @@ fn test_configure_operand_varbit_in_forbidden_region() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_configure_operand_varbit_almost_in_forbidden_region() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_ALMOST_FORBIDDEN: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_ALMOST_FORBIDDEN: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     static ALMOST_FORBIDDEN_BUFFER: [u8; 8] = [0; 8];
@@ -696,9 +696,9 @@ fn test_configure_operand_varbit_almost_in_forbidden_region() {
 
 #[test]
 fn test_configure_unknown_condition() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_UNK_COND: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_UNK_COND: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -716,9 +716,9 @@ fn test_configure_unknown_condition() {
 // boolean16/32/64 (0x31-0x33) are not supported. A Var operand using them must be rejected.
 #[test]
 fn test_configure_operand_var_sized_boolean_rejected() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_VAR_SIZED_BOOL: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_VAR_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -742,9 +742,9 @@ fn test_configure_operand_var_sized_boolean_rejected() {
 // boolean16/32/64 (0x31-0x33) are not supported. A VarBit operand using them must be rejected.
 #[test]
 fn test_configure_operand_varbit_sized_boolean_rejected() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_VARBIT_SIZED_BOOL: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_VARBIT_SIZED_BOOL: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -769,9 +769,9 @@ fn test_configure_operand_varbit_sized_boolean_rejected() {
 
 #[test]
 fn test_configure_loggable_bad_rpv() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_LOGGABLE_BAD_RPV: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_LOGGABLE_BAD_RPV: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -788,9 +788,9 @@ fn test_configure_loggable_bad_rpv() {
 
 #[test]
 fn test_owner_mechanism() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_OWNER: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_OWNER: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -853,7 +853,7 @@ fn test_owner_mechanism() {
 
 #[test]
 fn test_arm_trigger_not_configured() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
     static LOOPS_ARM_NOT_CFG: [&LoopHandler; 1] = [LOOP1.handler()];
     static mut DL_BUF_ARM_NOT_CFG: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
@@ -869,9 +869,9 @@ fn test_arm_trigger_not_configured() {
 
 #[test]
 fn test_arm_disarm_trigger_ok() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_ARM_DISARM: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_ARM_DISARM: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];
@@ -916,9 +916,9 @@ fn test_arm_disarm_trigger_ok() {
 
 #[test]
 fn test_get_status() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_GET_STATUS: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_GET_STATUS: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
@@ -956,9 +956,9 @@ fn test_get_status() {
 
 #[test]
 fn test_get_acquisition_metadata() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_META: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_META: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
@@ -1001,7 +1001,7 @@ fn test_get_acquisition_metadata() {
 
 #[test]
 fn test_read_acquisition_no_data_available() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
     static LOOPS_READ_NO_DATA: [&LoopHandler; 1] = [LOOP1.handler()];
     static mut DL_BUF_READ_NO_DATA: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 128];
@@ -1017,9 +1017,9 @@ fn test_read_acquisition_no_data_available() {
 
 #[test]
 fn test_read_acquisition_one_transfer() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_READ_ONE: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_READ_ONE: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 512];
@@ -1070,9 +1070,9 @@ fn test_read_acquisition_one_transfer() {
 
 #[test]
 fn test_read_acquisition_multiple_transfers() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_READ_MULTI: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_READ_MULTI: [u8; 1000] = [0; 1000];
     const DL_BUF_LEN: usize = 1000;
@@ -1153,9 +1153,9 @@ fn test_read_acquisition_multiple_transfers() {
 
 #[test]
 fn test_reset_datalogger() {
-    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).with_datalogging();
-    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").with_datalogging();
-    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+    static LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
     static LOOPS_RESET: [&LoopHandler; 3] = [LOOP1.handler(), LOOP2.handler(), LOOP3.handler()];
     static mut DL_BUF_RESET: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
     let mut rx = [0u8; 256];

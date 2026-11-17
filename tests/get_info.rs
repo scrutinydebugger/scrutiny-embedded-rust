@@ -428,8 +428,17 @@ fn test_rpv_definition_overflow() {
 
 // ── GetInfo/GetLoopCount ──────────────────────────────────────────────────────
 
+#[cfg(feature = "datalogging")]
+static TEST_LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 0x12345678).without_datalogging();
+#[cfg(feature = "datalogging")]
+static TEST_LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").without_datalogging();
+#[cfg(feature = "datalogging")]
+static TEST_LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
+#[cfg(not(feature = "datalogging"))]
 static TEST_LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 0x12345678);
+#[cfg(not(feature = "datalogging"))]
 static TEST_LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
+#[cfg(not(feature = "datalogging"))]
 static TEST_LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
 static TEST_LOOPS: [&LoopHandler; 3] = [TEST_LOOP1.handler(), TEST_LOOP2.handler(), TEST_LOOP3.handler()];
 

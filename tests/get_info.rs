@@ -105,6 +105,12 @@ fn test_software_id() {
 
 // ── GetInfo/GetSupportedFeatures ─────────────────────────────────────────────
 
+// GetSupportedFeatures bit 4: set when the crate is built with 64-bit support.
+#[cfg(feature = "support_64bits")]
+const SUPPORT_64BITS_BIT: u8 = 0x10;
+#[cfg(not(feature = "support_64bits"))]
+const SUPPORT_64BITS_BIT: u8 = 0;
+
 #[test]
 fn test_supported_features_memory_write_enabled() {
     let mut rx = [0u8; 128];
@@ -123,12 +129,7 @@ fn test_supported_features_memory_write_enabled() {
     assert_eq!(p.len(), 1);
     // bit 7 = memory write, bit 6 = datalogging (0: no datalogging buffer set),
     // bit 5 = user command, bit 4 = 64-bit support
-    let mut expected: u8 = 0x80;
-    #[cfg(feature = "support_64bits")]
-    {
-        expected |= 0x10;
-    }
-    assert_eq!(p[0], expected);
+    assert_eq!(p[0], 0x80 | SUPPORT_64BITS_BIT);
 }
 
 #[test]
@@ -147,12 +148,7 @@ fn test_supported_features_memory_write_disabled() {
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
     let p = resp_payload(&resp);
     assert_eq!(p.len(), 1);
-    let mut expected: u8 = 0;
-    #[cfg(feature = "support_64bits")]
-    {
-        expected |= 0x10;
-    }
-    assert_eq!(p[0], expected);
+    assert_eq!(p[0], SUPPORT_64BITS_BIT);
 }
 
 #[test]

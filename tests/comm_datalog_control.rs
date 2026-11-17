@@ -5,7 +5,9 @@ use scrutiny_embedded_rust::config::Config;
 use scrutiny_embedded_rust::datalogging::{State as DlState, MAX_OPERANDS};
 use scrutiny_embedded_rust::loop_handler::{FixedFreqLoopHandler, LoopHandler, VariableFreqLoopHandler};
 use scrutiny_embedded_rust::main_handler::MainHandler;
-use scrutiny_embedded_rust::protocol::{CommandId, CommControlSubfn, DataLogControlSubfn, ResponseCode, CONNECT_MAGIC};
+use scrutiny_embedded_rust::protocol::{
+    CommandId, CommControlSubfn, DataLogControlSubfn, GetInfoSubfn, ResponseCode, CONNECT_MAGIC,
+};
 use scrutiny_embedded_rust::tools::crc32;
 use scrutiny_embedded_rust::types::{AnyType, RuntimePublishedValue, VariableType};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -416,6 +418,97 @@ fn test_configure_no_datalogging_support() {
     let resp = send_configure(&mut h, &cfg);
     h.process(0);
     assert_eq!(resp_code(&resp), ResponseCode::Forbidden as u8);
+}
+
+fn get_supported_features(h: &mut MainHandler<'_, '_>) -> u8 {
+    let req = make_request(CommandId::GetInfo as u8, GetInfoSubfn::GetSupportedFeatures as u8, &[]);
+    let resp = send_and_recv(h, &req);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    resp_payload(&resp)[0]
+}
+
+fn get_loop_attributes(h: &mut MainHandler<'_, '_>, loop_id: u8) -> u8 {
+    let req = make_request(CommandId::GetInfo as u8, GetInfoSubfn::GetLoopDefinition as u8, &[loop_id]);
+    let resp = send_and_recv(h, &req);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
+    let p = resp_payload(&resp);
+    assert_eq!(p[0], loop_id);
+    p[2]
+}
+
+// Buffer set but no loop allows datalogging: no datalogger is created (accepted difference D-02).
+#[test]
+fn test_datalogging_disabled_on_all_loops() {
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100).without_datalogging();
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").without_datalogging();
+    static LOOPS_ALL_DISABLED: [&LoopHandler; 2] = [LOOP1.handler(), LOOP2.handler()];
+    static mut DL_BUF_ALL_DISABLED: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    let mut rx = [0u8; 256];
+    let mut tx = [0u8; 128];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ALL_DISABLED) }, &LOOPS_ALL_DISABLED);
+    connect(&mut h);
+
+    assert_eq!(get_supported_features(&mut h) & 0x40, 0, "datalogging bit (0x40) must be clear");
+    assert_eq!(get_loop_attributes(&mut h, 0) & 0x80, 0);
+    assert_eq!(get_loop_attributes(&mut h, 1) & 0x80, 0);
+
+    let subfns = [
+        DataLogControlSubfn::GetSetup,
+        DataLogControlSubfn::ConfigureDatalog,
+        DataLogControlSubfn::ArmTrigger,
+        DataLogControlSubfn::DisarmTrigger,
+        DataLogControlSubfn::GetStatus,
+        DataLogControlSubfn::GetAcquisitionMetadata,
+        DataLogControlSubfn::ReadAcquisition,
+        DataLogControlSubfn::ResetDatalogger,
+    ];
+    for subfn in subfns {
+        let resp = if subfn == DataLogControlSubfn::ConfigureDatalog {
+            let mut cfg = get_valid_reference_config();
+            cfg.loop_id = 0;
+            send_configure(&mut h, &cfg)
+        } else {
+            let req = make_request(CommandId::DataLogControl as u8, subfn as u8, &[]);
+            send_and_recv(&mut h, &req)
+        };
+        h.process(0);
+        assert_eq!(resp_code(&resp), ResponseCode::UnsupportedFeature as u8, "subfn={}", subfn as u8);
+    }
+
+    LOOP1.process_with_time(0);
+    LOOP2.process_with_time(0);
+    h.process(0);
+    assert_eq!(h.get_datalogger_state(), DlState::Idle);
+}
+
+// Only one loop allows datalogging: the feature is advertised, the other loop is refused.
+#[test]
+fn test_datalogging_disabled_on_one_loop() {
+    static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 100);
+    static LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").without_datalogging();
+    static LOOPS_ONE_DISABLED: [&LoopHandler; 2] = [LOOP1.handler(), LOOP2.handler()];
+    static mut DL_BUF_ONE_DISABLED: [u8; DATALOG_BUFFER_SIZE] = [0; DATALOG_BUFFER_SIZE];
+    let mut rx = [0u8; 256];
+    let mut tx = [0u8; 128];
+    let mut h = make_handler_with_loops(&mut rx, &mut tx, unsafe { &mut *core::ptr::addr_of_mut!(DL_BUF_ONE_DISABLED) }, &LOOPS_ONE_DISABLED);
+    connect(&mut h);
+
+    assert_ne!(get_supported_features(&mut h) & 0x40, 0, "datalogging bit (0x40) must be set");
+    assert_ne!(get_loop_attributes(&mut h, 0) & 0x80, 0, "loop 0 allows datalogging");
+    assert_eq!(get_loop_attributes(&mut h, 1) & 0x80, 0, "loop 1 does not allow datalogging");
+
+    let mut cfg = get_valid_reference_config();
+    cfg.loop_id = 1;
+    let resp = send_configure(&mut h, &cfg);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::Forbidden as u8);
+
+    cfg.loop_id = 0;
+    let resp = send_configure(&mut h, &cfg);
+    h.process(0);
+    assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
 }
 
 #[test]

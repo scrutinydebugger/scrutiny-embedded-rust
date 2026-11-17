@@ -121,7 +121,7 @@ fn test_supported_features_memory_write_enabled() {
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
     let p = resp_payload(&resp);
     assert_eq!(p.len(), 1);
-    // bit 7 = memory write, bit 6 = datalogging (always 0, not yet implemented),
+    // bit 7 = memory write, bit 6 = datalogging (0: no datalogging buffer set),
     // bit 5 = user command, bit 4 = 64-bit support
     let mut expected: u8 = 0x80;
     #[cfg(feature = "support_64bits")]
@@ -428,16 +428,11 @@ fn test_rpv_definition_overflow() {
 
 // ── GetInfo/GetLoopCount ──────────────────────────────────────────────────────
 
-#[cfg(feature = "datalogging")]
-static TEST_LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 0x12345678).without_datalogging();
-#[cfg(feature = "datalogging")]
-static TEST_LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2").without_datalogging();
+// Same as C++: Loop1 and Loop2 keep datalogging enabled by default, only Loop3 disables it.
+static TEST_LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 0x12345678);
+static TEST_LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
 #[cfg(feature = "datalogging")]
 static TEST_LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100).without_datalogging();
-#[cfg(not(feature = "datalogging"))]
-static TEST_LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 0x12345678);
-#[cfg(not(feature = "datalogging"))]
-static TEST_LOOP2: VariableFreqLoopHandler = VariableFreqLoopHandler::new("Loop2");
 #[cfg(not(feature = "datalogging"))]
 static TEST_LOOP3: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop3", 100);
 static TEST_LOOPS: [&LoopHandler; 3] = [TEST_LOOP1.handler(), TEST_LOOP2.handler(), TEST_LOOP3.handler()];
@@ -481,6 +476,12 @@ fn test_loop_count_no_loops() {
 
 // ── GetInfo/GetLoopDefinition ─────────────────────────────────────────────────
 
+// Attribute bit 0x80 is set when the loop allows datalogging. Always 0 without the datalogging feature.
+#[cfg(feature = "datalogging")]
+const DATALOGGING_ALLOWED_ATTR: u8 = 0x80;
+#[cfg(not(feature = "datalogging"))]
+const DATALOGGING_ALLOWED_ATTR: u8 = 0;
+
 #[test]
 fn test_loop_definition_fixed_freq() {
     let mut rx = [0u8; 128];
@@ -499,7 +500,7 @@ fn test_loop_definition_fixed_freq() {
     // Wire: loop_id(1) + type(1) + attributes(1) + timestep_100ns(4) + name_len(1) + name
     assert_eq!(p[0], 0, "loop ID");
     assert_eq!(p[1], LoopType::FixedFreq as u8, "loop type");
-    assert_eq!(p[2], 0, "attributes (datalogging not implemented)");
+    assert_eq!(p[2], DATALOGGING_ALLOWED_ATTR, "attributes (datalogging enabled by default)");
     let timestep = u32::from_be_bytes([p[3], p[4], p[5], p[6]]);
     assert_eq!(timestep, 0x12345678u32, "timestep_100ns");
     let name_len = p[7] as usize;
@@ -525,7 +526,7 @@ fn test_loop_definition_variable_freq() {
     // Wire: loop_id(1) + type(1) + attributes(1) + name_len(1) + name  (no timestep for variable freq)
     assert_eq!(p[0], 1, "loop ID");
     assert_eq!(p[1], LoopType::VariableFreq as u8, "loop type");
-    assert_eq!(p[2], 0, "attributes");
+    assert_eq!(p[2], DATALOGGING_ALLOWED_ATTR, "attributes (datalogging enabled by default)");
     let name_len = p[3] as usize;
     assert_eq!(name_len, 5, "name length");
     assert_eq!(&p[4..4 + name_len], b"Loop2");
@@ -533,8 +534,7 @@ fn test_loop_definition_variable_freq() {
 
 #[test]
 fn test_loop_definition_fixed_freq_datalogging_disabled() {
-    // Loop3 has datalogging disabled in C++. In Rust datalogging is not implemented yet,
-    // so the attributes byte is always 0 regardless.
+    // Loop3 has datalogging disabled, so the attributes byte is 0 (also 0 without the datalogging feature).
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
     let mut cfg = Config::new();

@@ -1683,4 +1683,120 @@ mod tests {
         // bitsize=0 → always invalid
         assert!(!fetch_operand(&host, &make(0, 0), &mut out));
     }
+
+    // Mirrors C++ TestVariableFetching.RandomFetch: values packed at unaligned offsets.
+    #[test]
+    fn random_fetch() {
+        let host = FetchTestHost;
+        let mut some_buffer = [0u8; 32];
+
+        let f32_val: f32 = 1.2345;
+        let u16_val: u16 = 0x1234;
+        let b_val = true;
+
+        let f32_offset = 0;
+        let f64_offset = f32_offset + 4;
+        let u16_offset = f64_offset + 8;
+        let bool_offset = u16_offset + 2;
+
+        some_buffer[f32_offset..f32_offset + 4].copy_from_slice(&f32_val.to_ne_bytes());
+        some_buffer[u16_offset..u16_offset + 2].copy_from_slice(&u16_val.to_ne_bytes());
+        some_buffer[bool_offset] = u8::from(b_val);
+
+        let mut out = AnyType { uint32: 0 };
+
+        assert!(fetch_variable(&host, &raw const some_buffer[f32_offset], VariableType::Float32, &mut out));
+        assert_eq!(unsafe { out.float32 }, f32_val);
+
+        #[cfg(feature = "support_64bits")]
+        {
+            let f64_val: f64 = 3.141_592_6;
+            some_buffer[f64_offset..f64_offset + 8].copy_from_slice(&f64_val.to_ne_bytes());
+            assert!(fetch_variable(&host, &raw const some_buffer[f64_offset], VariableType::Float64, &mut out));
+            assert_eq!(unsafe { out.float64 }, f64_val);
+        }
+
+        assert!(fetch_variable(&host, &raw const some_buffer[u16_offset], VariableType::Uint16, &mut out));
+        assert_eq!(unsafe { out.uint16 }, u16_val);
+
+        assert!(fetch_variable(&host, &raw const some_buffer[bool_offset], VariableType::Boolean, &mut out));
+        assert_eq!(unsafe { out.boolean }, b_val);
+    }
+
+    fn xorshift32(state: &mut u32) -> u32 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        *state = x;
+        x
+    }
+
+    // Fetch every supported type at pseudo-random offsets (fixed seed) and compare with what was written.
+    #[test]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    fn random_fetch_all_types_random_offsets() {
+        let host = FetchTestHost;
+        let mut rng: u32 = 0x1234_5678;
+        let mut buffer = [0u8; 64];
+        let mut out = AnyType { uint32: 0 };
+
+        for _ in 0..1000 {
+            let offset = (xorshift32(&mut rng) % 48) as usize;
+            let r = xorshift32(&mut rng);
+            let dst = &mut buffer[offset..];
+            let addr: *const u8 = dst.as_ptr();
+
+            dst[..1].copy_from_slice(&(r as u8).to_ne_bytes());
+            assert!(fetch_variable(&host, addr, VariableType::Uint8, &mut out));
+            assert_eq!(unsafe { out.uint8 }, r as u8);
+
+            dst[..1].copy_from_slice(&(r as i8).to_ne_bytes());
+            assert!(fetch_variable(&host, addr, VariableType::Sint8, &mut out));
+            assert_eq!(unsafe { out.sint8 }, r as i8);
+
+            dst[..2].copy_from_slice(&(r as u16).to_ne_bytes());
+            assert!(fetch_variable(&host, addr, VariableType::Uint16, &mut out));
+            assert_eq!(unsafe { out.uint16 }, r as u16);
+
+            dst[..2].copy_from_slice(&(r as i16).to_ne_bytes());
+            assert!(fetch_variable(&host, addr, VariableType::Sint16, &mut out));
+            assert_eq!(unsafe { out.sint16 }, r as i16);
+
+            dst[..4].copy_from_slice(&r.to_ne_bytes());
+            assert!(fetch_variable(&host, addr, VariableType::Uint32, &mut out));
+            assert_eq!(unsafe { out.uint32 }, r);
+
+            dst[..4].copy_from_slice(&(r as i32).to_ne_bytes());
+            assert!(fetch_variable(&host, addr, VariableType::Sint32, &mut out));
+            assert_eq!(unsafe { out.sint32 }, r as i32);
+
+            // Bit pattern comparison so a NaN payload is still checked.
+            dst[..4].copy_from_slice(&r.to_ne_bytes());
+            assert!(fetch_variable(&host, addr, VariableType::Float32, &mut out));
+            assert_eq!(unsafe { out.float32 }.to_bits(), r);
+
+            let b = (r & 1) == 1;
+            dst[0] = u8::from(b);
+            assert!(fetch_variable(&host, addr, VariableType::Boolean, &mut out));
+            assert_eq!(unsafe { out.boolean }, b);
+
+            #[cfg(feature = "support_64bits")]
+            {
+                let r64 = (u64::from(xorshift32(&mut rng)) << 32) | u64::from(r);
+
+                dst[..8].copy_from_slice(&r64.to_ne_bytes());
+                assert!(fetch_variable(&host, addr, VariableType::Uint64, &mut out));
+                assert_eq!(unsafe { out.uint64 }, r64);
+
+                dst[..8].copy_from_slice(&(r64 as i64).to_ne_bytes());
+                assert!(fetch_variable(&host, addr, VariableType::Sint64, &mut out));
+                assert_eq!(unsafe { out.sint64 }, r64 as i64);
+
+                dst[..8].copy_from_slice(&r64.to_ne_bytes());
+                assert!(fetch_variable(&host, addr, VariableType::Float64, &mut out));
+                assert_eq!(unsafe { out.float64 }.to_bits(), r64);
+            }
+        }
+    }
 }

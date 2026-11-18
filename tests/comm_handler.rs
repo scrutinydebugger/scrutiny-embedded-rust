@@ -113,7 +113,7 @@ fn test_heartbeat_timeout_expire() {
     assert!(comm.is_connected());
 
     tb.step(HEARTBEAT_TIMEOUT_100NS - 1);
-    comm.heartbeat(11, &tb); // repeated challenge — ignored
+    comm.heartbeat(11, &tb); // repeated challenge is ignored
     comm.process(&tb);
     assert!(comm.is_connected());
 
@@ -161,8 +161,9 @@ fn test_connect_disconnect() {
 
     comm.disconnect(&tb);
     comm.connect(&tb);
-    tb.step(1); // small clock advance so the new session has a fresh timestamp
-                // Supply only the last byte of the old frame — must not complete a request
+    tb.step(1); // new session gets a fresh timestamp
+
+    // The last byte of the old frame must not complete a request
     comm.receive_data(&frame[frame.len() - 1..], &mut rx, &tb);
     assert!(!comm.request_received());
 }
@@ -312,7 +313,7 @@ fn test_discover_without_session() {
     let (mut rx, tx) = make_comm_buffers();
     let tb = Timebase::new();
     let mut comm = CommHandler::new(&rx, &tx, 0);
-    // No connect() — session inactive
+    // No connect(), session inactive
 
     let frame = make_request(
         CommandId::CommControl as u8,

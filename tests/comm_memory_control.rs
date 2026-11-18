@@ -10,7 +10,7 @@ use scrutiny_embedded_rust::types::{AnyType, RuntimePublishedValue, VariableType
 #[cfg(feature = "protected_regions")]
 use scrutiny_embedded_rust::types::AddressRange;
 
-// ── Wire helpers ─────────────────────────────────────────────────────────────
+// Wire helpers
 
 const ADDR_SIZE: usize = core::mem::size_of::<*const u8>();
 
@@ -62,7 +62,7 @@ fn resp_payload(resp: &[u8]) -> &[u8] {
     &resp[5..5 + len]
 }
 
-// ── Address encoding helpers ─────────────────────────────────────────────────
+// Address encoding helpers
 
 fn encode_addr(ptr: *const u8) -> Vec<u8> {
     let addr = ptr as usize;
@@ -103,7 +103,7 @@ fn masked_write_block(ptr: *const u8, data: &[u8], mask: &[u8]) -> Vec<u8> {
     v
 }
 
-// ── MemoryControl/Read ───────────────────────────────────────────────────────
+// MemoryControl/Read
 
 #[test]
 fn test_read_single_block() {
@@ -215,7 +215,7 @@ fn test_read_empty_request() {
 
 #[test]
 fn test_read_overflow_tx_buffer() {
-    // Request more bytes than the TX buffer can hold → Overflow.
+    // Request more bytes than the TX buffer can hold -> Overflow.
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 64];
     let mut cfg = Config::new();
@@ -296,7 +296,7 @@ fn test_read_forbidden_address() {
         let resp = send_and_recv(&mut h, &req);
         h.process(0);
 
-        // Window [i, i+4) overlaps [6,10) if i < 10 AND i+4 > 6 → i in [3..9] inclusive
+        // Window [i, i+4) overlaps [6,10) if i < 10 AND i+4 > 6 -> i in [3..9] inclusive
         let overlaps = i < 10 && i + (window as usize) > 6;
         let expected = if overlaps {
             ResponseCode::Forbidden as u8
@@ -310,7 +310,7 @@ fn test_read_forbidden_address() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_read_forbidden_containment() {
-    // Request spans a range that fully contains the forbidden region → Forbidden.
+    // Request spans a range that fully contains the forbidden region -> Forbidden.
     let buf = [0u8; 16];
     let forbidden_start = unsafe { buf.as_ptr().add(6) };
     let forbidden_end = unsafe { buf.as_ptr().add(9) };
@@ -331,7 +331,7 @@ fn test_read_forbidden_containment() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    // Read from 1 byte before forbidden through 1 byte after → 6 bytes spanning the region.
+    // Read from 1 byte before forbidden through 1 byte after -> 6 bytes spanning the region.
     let read_ptr = unsafe { buf.as_ptr().add(5) };
     let payload = read_block(read_ptr, 6);
     let req = make_request(CommandId::MemoryControl as u8, MemoryControlSubfn::Read as u8, &payload);
@@ -342,7 +342,7 @@ fn test_read_forbidden_containment() {
 #[cfg(feature = "protected_regions")]
 #[test]
 fn test_read_readonly_address_allowed() {
-    // Readonly regions must NOT block reads — only writes.
+    // Readonly regions block writes only, not reads.
     let buf: [u8; 16] = [
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
     ];
@@ -380,7 +380,7 @@ fn test_read_readonly_address_allowed() {
     }
 }
 
-// ── MemoryControl/Write ──────────────────────────────────────────────────────
+// MemoryControl/Write
 
 #[test]
 fn test_write_single_block() {
@@ -507,7 +507,7 @@ fn test_write_invalid_data_length() {
 
 #[test]
 fn test_write_invalid_request_bad_length() {
-    // Various request lengths — only exact block multiples are valid.
+    // Only exact block multiples are valid.
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
     let mut cfg = Config::new();
@@ -674,7 +674,7 @@ fn test_write_readonly_containment() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    // Write from 1 byte before the readonly through 1 byte after → 6 bytes.
+    // Write from 1 byte before the readonly through 1 byte after -> 6 bytes.
     let write_ptr = unsafe { buf.as_ptr().add(5) };
     let payload = write_block(write_ptr, &[0xFFu8; 6]);
     let req = make_request(
@@ -686,7 +686,7 @@ fn test_write_readonly_containment() {
     assert_eq!(resp_code(&resp), ResponseCode::Forbidden as u8);
 }
 
-// ── MemoryControl/WriteMasked ────────────────────────────────────────────────
+// MemoryControl/WriteMasked
 
 #[test]
 fn test_write_masked_single_block() {
@@ -697,16 +697,7 @@ fn test_write_masked_single_block() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    // Initial: 0xAA repeated.
-    // Data:  [0xFF, 0xFF, 0x00, 0x00, 0x55, 0x55]
-    // Mask:  [0xF0, 0xAA, 0xF0, 0xAA, 0xAF, 0x55]
-    // Expected: for each byte: (cur & !mask) | (data & mask)
-    //   byte 0: (0xAA & 0x0F) | (0xFF & 0xF0) = 0x0A | 0xF0 = 0xFA
-    //   byte 1: (0xAA & 0x55) | (0xFF & 0xAA) = 0x00 | 0xAA = 0xAA  (wait: ~0xAA = 0x55, so 0xAA & 0x55 = 0x00; 0xFF & 0xAA = 0xAA) → 0xAA
-    //   byte 2: (0xAA & 0x0F) | (0x00 & 0xF0) = 0x0A | 0x00 = 0x0A
-    //   byte 3: (0xAA & 0x55) | (0x00 & 0xAA) = 0x00 | 0x00 = 0x00
-    //   byte 4: (0xAA & 0x50) | (0x55 & 0xAF) = 0x00 | 0x05 = 0x05
-    //   byte 5: (0xAA & 0xAA) | (0x55 & 0x55) = 0xAA | 0x55 = 0xFF
+    // Each byte becomes (cur & !mask) | (data & mask)
     let mut buf = [0xAAu8; 10];
     let data = [0xFFu8, 0xFF, 0x00, 0x00, 0x55, 0x55];
     let mask = [0xF0u8, 0xAA, 0xF0, 0xAA, 0xAF, 0x55];
@@ -885,7 +876,7 @@ fn test_write_masked_forbidden_address() {
     }
 }
 
-// ── MemoryControl/ReadRpv ────────────────────────────────────────────────────
+// MemoryControl/ReadRpv
 
 fn rpv_read_cb(rpv: RuntimePublishedValue, out: &mut AnyType, _caller: Option<&'static str>) -> bool {
     match rpv.id {
@@ -1012,7 +1003,7 @@ fn test_read_rpv_invalid_odd_length() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    // Odd number of bytes → cannot be a list of 2-byte IDs.
+    // Odd number of bytes -> cannot be a list of 2-byte IDs.
     let payload = [0x11u8, 0x22, 0x33]; // 3 bytes
     let req = make_request(
         CommandId::MemoryControl as u8,
@@ -1225,7 +1216,7 @@ fn test_read_rpv_response_overflow() {
     assert!(resp_payload(&resp).is_empty());
 }
 
-// ── MemoryControl/WriteRpv ───────────────────────────────────────────────────
+// MemoryControl/WriteRpv
 
 #[test]
 fn test_write_rpv_single() {
@@ -1325,7 +1316,7 @@ fn test_write_rpv_unknown_id() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    // ID 0xDEAD is not registered — parsing cannot continue (unknown size).
+    // ID 0xDEAD is not registered, parsing cannot continue (unknown size).
     let mut payload = vec![0xDEu8, 0xAD];
     payload.extend_from_slice(&0u32.to_be_bytes()); // some value
     let req = make_request(
@@ -1339,7 +1330,7 @@ fn test_write_rpv_unknown_id() {
 
 #[test]
 fn test_write_rpv_truncated_value() {
-    // The value bytes for a known RPV are truncated → InvalidRequest.
+    // The value bytes for a known RPV are truncated -> InvalidRequest.
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
     let mut cfg = Config::new();
@@ -1361,7 +1352,7 @@ fn test_write_rpv_truncated_value() {
 
 #[test]
 fn test_write_rpv_callback_failure() {
-    // When the write callback returns false → FailureToProceed.
+    // When the write callback returns false -> FailureToProceed.
     let mut rx = [0u8; 128];
     let mut tx = [0u8; 128];
     let mut cfg = Config::new();
@@ -1649,7 +1640,7 @@ fn test_write_rpv_response_full_no_overflow() {
     assert_eq!(resp_payload(&resp), expected_payload.as_slice());
 }
 
-// ── Subfn routing ────────────────────────────────────────────────────────────
+// Subfn routing
 
 #[test]
 fn test_unsupported_subfn() {

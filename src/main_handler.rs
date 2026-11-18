@@ -30,7 +30,7 @@ use crate::protocol::codec_v1_0::{
 #[cfg(feature = "datalogging")]
 use crate::protocol::definitions::DataLogControlSubfn;
 
-// ── Datalogging error type ────────────────────────────────────────────────────
+// Datalogging error type
 
 #[cfg(feature = "datalogging")]
 /// Error state tracked by the main handler's datalogging subsystem.
@@ -41,7 +41,7 @@ pub enum DataloggingError {
     UnexpectedRelease,
 }
 
-// ── Datalogging runtime state (main-handler side) ─────────────────────────────
+// Datalogging runtime state (main-handler side)
 
 #[cfg(feature = "datalogging")]
 struct DataloggingState {
@@ -87,7 +87,7 @@ impl DataloggingState {
     };
 }
 
-// ── DataloggerHost implementation (inline host for configure / validate) ──────
+// DataloggerHost implementation (inline host for configure / validate)
 
 #[cfg(feature = "datalogging")]
 struct RpvHost {
@@ -119,10 +119,10 @@ impl DataloggerHost for RpvHost {
         self.rpv_read_callback.is_some_and(|cb| cb(rpv, out, None))
     }
 
-    // caller_name() defaults to None — reads from the main handler have no owning loop.
+    // caller_name() defaults to None: reads from the main handler have no owning loop.
 }
 
-// ── MainHandler ───────────────────────────────────────────────────────────────
+// MainHandler
 
 /// Top-level Scrutiny handler. Owns the communication buffers and drives the protocol.
 ///
@@ -160,9 +160,6 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
     /// Consumes `config` and returns an initialised handler, or `None` if the config is invalid.
     ///
     /// Must be called before the loop handlers start running: it clears their IPC state.
-    ///
-    /// The returned handler is meant to live for the whole program. Do not move it after
-    /// its first `process()` call: loops hold the address of the datalogger it owns.
     #[must_use]
     pub fn new(mut config: Config<'rxbuf, 'txbuf>) -> Option<Self> {
         let rx_buf = config.take_rx_buffer()?;
@@ -258,9 +255,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
                     // Safety: no loop owns the datalogger, so no concurrent access to the cell.
                     unsafe { cell.get() }.reset();
                 }
-                // else: a loop currently owns the datalogger; resetting here would alias with the
-                // loop's `cell.get()` calls. The handler is permanently disabled from this point,
-                // so leaving the datalogger in its current state is inert.
+                // If a loop owns it, it is left untouched: the handler stays disabled anyway.
             }
             return;
         }
@@ -414,7 +409,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    // ── Loop / datalogging IPC pumps ──────────────────────────────────────────
+    // Loop / datalogging IPC pumps
 
     // Loop IPC only carries datalogging messages, so there is nothing to pump without the feature.
     #[cfg(feature = "datalogging")]
@@ -595,7 +590,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    // ===== GetInfo =====
+    // GetInfo
 
     #[allow(clippy::too_many_arguments)]
     fn process_get_info(
@@ -807,7 +802,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    // ===== CommControl =====
+    // CommControl
 
     #[allow(clippy::too_many_arguments)]
     fn process_comm_control(
@@ -914,7 +909,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    // ===== MemoryControl =====
+    // MemoryControl
 
     #[allow(clippy::too_many_arguments)]
     fn process_memory_control(
@@ -1014,7 +1009,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         }
     }
 
-    // ===== UserCommand =====
+    // UserCommand
 
     /// Calls the user command callback with the request data and the whole TX buffer as response buffer.
     fn process_user_command(
@@ -1037,7 +1032,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         ResponseCode::Ok
     }
 
-    // ===== DataLogControl =====
+    // DataLogControl
 
     #[cfg(feature = "datalogging")]
     #[allow(clippy::too_many_arguments)]
@@ -1285,7 +1280,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         if !Self::claim_datalogger(dl, true) {
             return ResponseCode::ProcessAgain;
         }
-        // Safety: owner is None — no concurrent loop access.
+        // Safety: owner is None, no concurrent loop access.
         let dl_obj = unsafe { cell.get() };
         let acq_id = dl_obj.get_acquisition_id();
         let config_id = dl_obj.get_config_id();
@@ -1317,7 +1312,7 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         if !Self::claim_datalogger(dl, true) {
             return ResponseCode::ProcessAgain;
         }
-        // Safety: owner is None — no concurrent loop access.
+        // Safety: owner is None, no concurrent loop access.
         let dl_obj = unsafe { cell.get() };
         if !dl.reading_in_progress {
             dl_obj.get_encoder_mut().reset_reader();

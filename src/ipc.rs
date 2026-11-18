@@ -3,16 +3,11 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 /// Abstraction over a single atomic boolean flag.
 ///
-/// Implementations must enforce Acquire semantics on `load` and Release semantics on `store`
-/// so that all writes to the guarded payload are visible to the reader after the flag is set.
+/// `load` must use Acquire ordering and `store` Release ordering. Both must be safe to
+/// call from concurrent contexts (ISR + main loop).
 ///
-/// # Safety
-/// Implementors must guarantee that `load` and `store` are individually safe to call from
-/// concurrent contexts (ISR + main loop). `Sync` is a supertrait to enforce this at the type level.
-///
-/// # Platform flags
-/// To use another flag for the loop IPC channels: implement this trait, provide a
-/// `const fn new(val: bool) -> Self` on the type, then point [`LoopIpcFlag`] to it.
+/// To use another flag for the loop IPC channels, implement this trait, add a
+/// `const fn new(val: bool) -> Self` and point [`LoopIpcFlag`] to it.
 pub trait AtomicFlag: Sync {
     /// Reads the flag with Acquire ordering.
     fn load(&self) -> bool;
@@ -20,7 +15,7 @@ pub trait AtomicFlag: Sync {
     fn store(&self, val: bool);
 }
 
-// ===== Default implementation: core::sync::atomic::AtomicBool =====
+// Default implementation: core::sync::atomic::AtomicBool
 
 /// `AtomicFlag` implementation backed by `core::sync::atomic::AtomicBool`.
 /// Suitable for any target that supports the standard Rust atomic intrinsics.
@@ -48,7 +43,7 @@ impl AtomicFlag for StdAtomicFlag {
 // Single place to change (or later make cfg-selectable) to use another platform flag.
 pub type LoopIpcFlag = StdAtomicFlag;
 
-// ===== IpcMessage =====
+// IpcMessage
 
 /// Single-slot, single-producer / single-consumer message channel.
 ///
@@ -56,7 +51,7 @@ pub type LoopIpcFlag = StdAtomicFlag;
 /// An atomic flag guards the slot: the sender sets it after writing the payload
 /// (Release), and the receiver clears it after reading (Acquire).
 ///
-/// `T` must be `Copy` — no heap, no drop glue. `F` is the platform-specific flag.
+/// `T` must be `Copy`. `F` is the platform-specific flag.
 pub struct IpcMessage<T: Copy, F: AtomicFlag> {
     data: UnsafeCell<T>,
     flag: F,
@@ -103,9 +98,6 @@ impl<T: Copy, F: AtomicFlag> IpcMessage<T, F> {
 
 impl<T: Copy> IpcMessage<T, StdAtomicFlag> {
     /// Creates a new `IpcMessage` backed by `StdAtomicFlag`.
-    ///
-    /// This is a `const fn` so that `static` items can be initialised without a
-    /// heap allocator. Custom platforms should provide their own analogous constructor.
     #[must_use]
     pub const fn new_std(init: T) -> Self {
         Self {
@@ -128,7 +120,7 @@ impl<T: Copy> IpcMessage<T, LoopIpcFlag> {
     }
 }
 
-// ===== Datalogging IPC message types =====
+// Datalogging IPC message types
 
 #[cfg(feature = "datalogging")]
 /// Messages the main handler sends to a loop handler.

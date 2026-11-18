@@ -10,19 +10,10 @@ use super::definitions::{
 
 /// Manages the transport layer of the Scrutiny protocol.
 ///
-/// Receives raw bytes, validates framing and CRC, and surfaces complete
-/// requests to the caller. Serialises responses back into the byte stream.
-/// Maintains session lifecycle including the heartbeat watchdog.
+/// Handles framing, CRC and the session heartbeat. Half-duplex, request/response.
 ///
-/// Communication is half-duplex and works by polling with a request/response scheme.
-///
-/// Buffer ownership stays with the caller. Every method that reads or writes
-/// payload bytes takes explicit `rx_buf`/`tx_buf` slice parameters rather than
-/// storing references internally, so the caller can hold zero-copy references
-/// into those buffers without conflicting borrows.
-///
-/// Methods that need to read the current time take `tb: &Timebase` explicitly
-/// so the caller keeps sole ownership of the timebase.
+/// Buffers and timebase are passed to each method instead of being stored, so the
+/// caller can keep references into them.
 pub struct CommHandler {
     active_request: Request,
     active_response: Response,

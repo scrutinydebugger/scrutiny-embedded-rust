@@ -12,7 +12,7 @@ pub use types::{
     MAX_OPERANDS,
 };
 
-// ── DataLoggerCell ────────────────────────────────────────────────────────────
+// DataLoggerCell
 
 use core::cell::UnsafeCell;
 
@@ -41,7 +41,7 @@ impl DataLoggerCell {
     }
 
     /// Returns the total byte capacity of the acquisition buffer.
-    /// Safe to call without ownership — `buffer_size` is set once at construction.
+    /// Safe to call without ownership: `buffer_size` is set once at construction.
     pub(crate) fn buffer_size(&self) -> usize {
         // SAFETY: buffer_size is a plain usize written once at construction and never changed.
         unsafe { (*self.0.get()).buffer_size() }

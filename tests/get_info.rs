@@ -60,7 +60,7 @@ fn resp_payload(resp: &[u8]) -> &[u8] {
     &resp[5..5 + len]
 }
 
-// ── GetInfo/GetProtocolVersion ───────────────────────────────────────────────
+// GetInfo/GetProtocolVersion
 
 #[test]
 fn test_protocol_version() {
@@ -83,7 +83,7 @@ fn test_protocol_version() {
     assert_eq!(p[1], PROTOCOL_VERSION_MINOR);
 }
 
-// ── GetInfo/GetSoftwareId ────────────────────────────────────────────────────
+// GetInfo/GetSoftwareId
 
 #[test]
 fn test_software_id() {
@@ -101,7 +101,7 @@ fn test_software_id() {
     assert_eq!(resp_payload(&resp), &SOFTWARE_ID[..]);
 }
 
-// ── GetInfo/GetSupportedFeatures ─────────────────────────────────────────────
+// GetInfo/GetSupportedFeatures
 
 // GetSupportedFeatures bit 4: set when the crate is built with 64-bit support.
 #[cfg(feature = "support_64bits")]
@@ -171,7 +171,7 @@ fn test_supported_features_with_user_command() {
     assert_ne!(p[0] & 0x20, 0, "user command bit (0x20) must be set");
 }
 
-// ── GetInfo/GetSpecialMemoryRegionCount ───────────────────────────────────────
+// GetInfo/GetSpecialMemoryRegionCount
 
 #[test]
 fn test_special_memory_region_count_no_regions() {
@@ -237,7 +237,7 @@ fn test_special_memory_region_count_with_regions() {
     assert_eq!(p[1], 1, "forbidden count should be 1");
 }
 
-// ── GetInfo/GetSpecialMemoryLocation ─────────────────────────────────────────
+// GetInfo/GetSpecialMemoryLocation
 
 #[cfg(feature = "protected_regions")]
 #[test]
@@ -347,7 +347,7 @@ fn test_special_memory_region_location_wrong_index() {
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
 }
 
-// ── GetInfo/GetRuntimePublishedValuesCount ────────────────────────────────────
+// GetInfo/GetRuntimePublishedValuesCount
 
 fn rpv_read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType, _caller: Option<&'static str>) -> bool {
     true
@@ -394,7 +394,7 @@ fn test_rpv_count() {
     assert_eq!(u16::from_be_bytes([p[0], p[1]]), 3);
 }
 
-// ── GetInfo/GetRuntimePublishedValuesDefinition ───────────────────────────────
+// GetInfo/GetRuntimePublishedValuesDefinition
 
 #[test]
 fn test_rpv_definition() {
@@ -426,7 +426,7 @@ fn test_rpv_definition() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    // Request: start_index=1, count=3 — reads rpvs[1..4]
+    // Request: start_index=1, count=3, reads rpvs[1..4]
     let req = make_request(
         CommandId::GetInfo as u8,
         GetInfoSubfn::GetRuntimePublishedValuesDefinition as u8,
@@ -436,7 +436,7 @@ fn test_rpv_definition() {
 
     assert_eq!(resp_code(&resp), ResponseCode::Ok as u8);
     let p = resp_payload(&resp);
-    assert_eq!(p.len(), 3 * 3, "3 entries × 3 bytes each");
+    assert_eq!(p.len(), 3 * 3, "3 entries x 3 bytes each");
 
     // rpvs[1]: id=0x3344, type=Float32
     assert_eq!(p[0], 0x33);
@@ -448,7 +448,7 @@ fn test_rpv_definition() {
     assert_eq!(p[4], 0x66);
     assert_eq!(p[5], VariableType::Uint16 as u8);
 
-    // rpvs[3]: id=0x7788, Boolean → Boolean8 (protocol maps it to the platform boolean size)
+    // rpvs[3]: id=0x7788, Boolean -> Boolean8 (protocol maps it to the platform boolean size)
     assert_eq!(p[6], 0x77);
     assert_eq!(p[7], 0x88);
     assert_eq!(p[8], VariableType::Boolean8 as u8);
@@ -479,7 +479,7 @@ fn test_rpv_definition_overflow() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    // start=1, count=3: would read indices 1,2,3 but only 0,1,2 exist → overflow
+    // start=1, count=3: would read indices 1,2,3 but only 0,1,2 exist -> overflow
     let req = make_request(
         CommandId::GetInfo as u8,
         GetInfoSubfn::GetRuntimePublishedValuesDefinition as u8,
@@ -490,7 +490,7 @@ fn test_rpv_definition_overflow() {
     assert_eq!(resp_code(&resp), ResponseCode::FailureToProceed as u8);
 }
 
-// ── GetInfo/GetLoopCount ──────────────────────────────────────────────────────
+// GetInfo/GetLoopCount
 
 // Same as C++: Loop1 and Loop2 keep datalogging enabled by default, only Loop3 disables it.
 static TEST_LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("Loop1", 0x12345678);
@@ -538,7 +538,7 @@ fn test_loop_count_no_loops() {
     assert_eq!(p[0], 0);
 }
 
-// ── GetInfo/GetLoopDefinition ─────────────────────────────────────────────────
+// GetInfo/GetLoopDefinition
 
 // Attribute bit 0x80 is set when the loop allows datalogging. Always 0 without the datalogging feature.
 #[cfg(feature = "datalogging")]

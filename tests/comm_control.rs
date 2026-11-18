@@ -47,7 +47,7 @@ fn connect(h: &mut MainHandler<'_, '_>) -> u32 {
     h.get_session_id()
 }
 
-// ── CommControl/Discover ────────────────────────────────────────────────────
+// CommControl/Discover
 
 #[test]
 fn test_discover_response_payload() {
@@ -68,7 +68,7 @@ fn test_discover_response_payload() {
     assert!(h.data_to_send() > 0);
     let out = pop_response(&mut h);
 
-    // Response wire format: cmd|0x80, subfn, code, len_hi, len_lo, payload…, crc(4)
+    // Response wire format: cmd|0x80, subfn, code, len_hi, len_lo, payload..., crc(4)
     assert_eq!(out[0], CommandId::CommControl as u8 | 0x80);
     assert_eq!(out[1], CommControlSubfn::Discover as u8);
     assert_eq!(out[2], ResponseCode::Ok as u8);
@@ -149,7 +149,7 @@ fn test_discover_wrong_magic_while_connected_returns_invalid_request() {
     assert_eq!(resp[2], ResponseCode::InvalidRequest as u8);
 }
 
-// ── CommControl/Connect ─────────────────────────────────────────────────────
+// CommControl/Connect
 
 #[test]
 fn test_connect() {
@@ -204,7 +204,7 @@ fn test_connect_busy_when_already_connected() {
     assert_eq!(resp[2], ResponseCode::Busy as u8);
 }
 
-// ── CommControl/Heartbeat ───────────────────────────────────────────────────
+// CommControl/Heartbeat
 
 #[test]
 fn test_heartbeat() {
@@ -267,7 +267,7 @@ fn test_heartbeat_wrong_session_id() {
     assert_eq!(resp[2], ResponseCode::InvalidRequest as u8);
 }
 
-// ── CommControl/GetParams ───────────────────────────────────────────────────
+// CommControl/GetParams
 
 #[test]
 fn test_get_params() {
@@ -313,7 +313,7 @@ fn test_get_params() {
     assert_eq!(resp[22], 8u8);
 }
 
-// ── CommControl/Disconnect ──────────────────────────────────────────────────
+// CommControl/Disconnect
 
 #[test]
 fn test_disconnect() {

@@ -137,7 +137,7 @@ fn lt_mixed_sign_and_types() {
         // sint(-6) vs sint(-5): lt(-6,-5)=true / lt(-5,-6)=false
         assert_eq!(less_than_eval(&mut d, &ord2(swap, sp(-6), sp(-5))), !truefalse);
 
-        // uint(UINT_MAX-1) vs sint(-1): clamped→lt(INT_MAX,-1)=false / lt(-1,INT_MAX)=true
+        // uint(UINT_MAX-1) vs sint(-1): clamped->lt(INT_MAX,-1)=false / lt(-1,INT_MAX)=true
         assert_eq!(
             less_than_eval(&mut d, &ord2(swap, up(UintBiggest::MAX - 1), sp(-1))),
             truefalse
@@ -174,7 +174,7 @@ fn change_more_than_basic() {
 fn change_more_than_all_types() {
     let mut d = ConditionSharedData::default();
 
-    // ── Float value, Sint threshold ──────────────────────────────────────────
+    // Float value, Sint threshold
     change_more_than_reset(&mut d);
     assert!(!change_more_than_eval(&mut d, &[fp(10.0), sp(5)])); // init
     assert!(!change_more_than_eval(&mut d, &[fp(10.0), sp(5)]));
@@ -195,7 +195,7 @@ fn change_more_than_all_types() {
     assert!(change_more_than_eval(&mut d, &[fp(5.0), sp(-5)]));
     assert!(change_more_than_eval(&mut d, &[fp(-5.0), sp(-5)]));
 
-    // ── Float value, Uint threshold ──────────────────────────────────────────
+    // Float value, Uint threshold
     change_more_than_reset(&mut d);
     assert!(!change_more_than_eval(&mut d, &[fp(10.0), up(5)])); // init
     assert!(!change_more_than_eval(&mut d, &[fp(10.0), up(5)]));
@@ -207,7 +207,7 @@ fn change_more_than_all_types() {
     assert!(change_more_than_eval(&mut d, &[fp(20.0), up(5)]));
     assert!(change_more_than_eval(&mut d, &[fp(30.0), up(5)]));
 
-    // ── Uint value, Uint threshold ───────────────────────────────────────────
+    // Uint value, Uint threshold
     change_more_than_reset(&mut d);
     let b: UintBiggest = 0u32.wrapping_sub(1000) as UintBiggest;
     assert!(!change_more_than_eval(&mut d, &[up(b), up(5)]));
@@ -235,7 +235,7 @@ fn change_more_than_all_types() {
         &[up(b.wrapping_add(5).wrapping_add(10)), up(5)]
     ));
 
-    // ── Uint value, Sint threshold (positive) ───────────────────────────────
+    // Uint value, Sint threshold (positive)
     change_more_than_reset(&mut d);
     let b: UintBiggest = 0u32.wrapping_sub(1000) as UintBiggest;
     assert!(!change_more_than_eval(&mut d, &[up(b), sp(5)]));
@@ -263,7 +263,7 @@ fn change_more_than_all_types() {
         &[up(b.wrapping_add(11).wrapping_add(6)), sp(5)]
     ));
 
-    // ── Uint value, Sint threshold (negative) ───────────────────────────────
+    // Uint value, Sint threshold (negative)
     change_more_than_reset(&mut d);
     let b: UintBiggest = 0u32.wrapping_sub(1000) as UintBiggest;
     assert!(!change_more_than_eval(&mut d, &[up(b), sp(-5)]));
@@ -286,7 +286,7 @@ fn change_more_than_all_types() {
         &[up(b.wrapping_sub(90).wrapping_sub(10)), sp(-5)]
     ));
 
-    // ── Sint value, Sint threshold (positive) ───────────────────────────────
+    // Sint value, Sint threshold (positive)
     change_more_than_reset(&mut d);
     assert!(!change_more_than_eval(&mut d, &[sp(-100), sp(5)]));
     assert!(!change_more_than_eval(&mut d, &[sp(-100), sp(5)]));
@@ -298,7 +298,7 @@ fn change_more_than_all_types() {
     assert!(change_more_than_eval(&mut d, &[sp(-89), sp(5)]));
     assert!(change_more_than_eval(&mut d, &[sp(-83), sp(5)]));
 
-    // ── Sint value, Sint threshold (negative) ───────────────────────────────
+    // Sint value, Sint threshold (negative)
     change_more_than_reset(&mut d);
     assert!(!change_more_than_eval(&mut d, &[sp(-100), sp(-5)]));
     assert!(!change_more_than_eval(&mut d, &[sp(-100), sp(-5)]));
@@ -308,7 +308,7 @@ fn change_more_than_all_types() {
     assert!(change_more_than_eval(&mut d, &[sp(-190), sp(-5)]));
     assert!(change_more_than_eval(&mut d, &[sp(-200), sp(-5)]));
 
-    // ── Sint value, Uint threshold (positive) ───────────────────────────────
+    // Sint value, Uint threshold (positive)
     change_more_than_reset(&mut d);
     assert!(!change_more_than_eval(&mut d, &[sp(-100), up(5)]));
     assert!(!change_more_than_eval(&mut d, &[sp(-100), up(5)]));

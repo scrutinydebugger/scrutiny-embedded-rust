@@ -47,7 +47,7 @@ fn read_u32(var: &str, default: u32) -> u32 {
     }
 }
 
-/// Formats a `u32` with underscore digit separators (e.g. `5000000` → `5_000_000`).
+/// Formats a `u32` with underscore digit separators (e.g. `5000000` -> `5_000_000`).
 fn sep(n: u32) -> String {
     let s = n.to_string();
     let chars: Vec<char> = s.chars().collect();

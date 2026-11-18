@@ -348,16 +348,13 @@ fn encode_anytype_be(val: AnyType, var_type: VariableType, dst: &mut [u8]) -> us
     // Safety: the caller guarantees var_type matches what was placed in `val`.
     unsafe {
         match var_type {
-            VariableType::Uint8 | VariableType::Boolean8 => {
+            // Booleans are copied as a raw byte: the callback may store a value that is not a valid `bool`.
+            VariableType::Uint8 | VariableType::Boolean8 | VariableType::Boolean => {
                 dst[0] = val.uint8;
                 1
             }
             VariableType::Sint8 => {
                 dst[0] = val.sint8.cast_unsigned();
-                1
-            }
-            VariableType::Boolean => {
-                dst[0] = u8::from(val.boolean);
                 1
             }
             VariableType::Uint16 => {

@@ -681,7 +681,8 @@ pub fn convert_to_compare_type(pair: &mut AnyValAndTypePair) {
                 pair.valtype = VariableType::Float32;
             }
             VariableType::Boolean | VariableType::Boolean8 => {
-                let b = UintBiggest::from(pair.val.boolean);
+                // Read as u8: the byte comes from arbitrary memory and may not be a valid `bool` (0 or 1).
+                let b = UintBiggest::from(pair.val.uint8 != 0);
                 crate::tools::set_biggest_uint(&mut pair.val, b);
                 pair.valtype = BIGGEST_UINT;
             }
@@ -1560,6 +1561,23 @@ mod tests {
         assert!(fetch_operand(&host, &op, &mut out));
         assert_eq!(out.valtype, VariableType::Boolean8);
         assert_eq!(unsafe { out.val.uint8 }, 1);
+    }
+
+    #[test]
+    fn convert_to_compare_type_boolean_from_any_byte() {
+        use crate::types::{UintBiggest, BIGGEST_UINT};
+
+        // A boolean byte read from memory may hold any value; nonzero must compare as 1.
+        for (raw, expected) in [(0u8, 0), (1, 1), (2, 1), (0xFF, 1)] {
+            for vt in [VariableType::Boolean, VariableType::Boolean8] {
+                let mut pair = AnyValAndTypePair::DEFAULT;
+                pair.valtype = vt;
+                pair.val = AnyType { uint8: raw };
+                convert_to_compare_type(&mut pair);
+                assert_eq!(pair.valtype, BIGGEST_UINT);
+                assert_eq!(crate::tools::read_biggest_uint(&pair.val), expected as UintBiggest);
+            }
+        }
     }
 
     #[test]

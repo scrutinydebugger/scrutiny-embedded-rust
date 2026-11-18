@@ -108,76 +108,84 @@ const fn is_supported_64bits_type(vt: VariableType) -> bool {
     }
 }
 
-cfg_select! {
-    feature = "support_64bits" => {
-        #[must_use]
-        #[inline]
-        pub const fn read_biggest_uint(v: &AnyType) -> UintBiggest {
-            unsafe { v.uint64 }
-        }
+/// Reads the biggest unsigned integer field of the union.
+#[must_use]
+#[inline]
+pub const fn read_biggest_uint(v: &AnyType) -> UintBiggest {
+    #[cfg(feature = "support_64bits")]
+    {
+        unsafe { v.uint64 }
+    }
+    #[cfg(not(feature = "support_64bits"))]
+    {
+        unsafe { v.uint32 }
+    }
+}
 
-        #[must_use]
-        #[inline]
-        pub const fn read_biggest_sint(v: &AnyType) -> IntBiggest {
-            unsafe { v.sint64 }
-        }
+/// Reads the biggest signed integer field of the union.
+#[must_use]
+#[inline]
+pub const fn read_biggest_sint(v: &AnyType) -> IntBiggest {
+    #[cfg(feature = "support_64bits")]
+    {
+        unsafe { v.sint64 }
+    }
+    #[cfg(not(feature = "support_64bits"))]
+    {
+        unsafe { v.sint32 }
+    }
+}
 
-        #[must_use]
-        #[inline]
-        pub const fn read_biggest_float(v: &AnyType) -> FloatBiggest {
-            unsafe { v.float64 }
-        }
+/// Reads the biggest floating point field of the union.
+#[must_use]
+#[inline]
+pub const fn read_biggest_float(v: &AnyType) -> FloatBiggest {
+    #[cfg(feature = "support_64bits")]
+    {
+        unsafe { v.float64 }
+    }
+    #[cfg(not(feature = "support_64bits"))]
+    {
+        unsafe { v.float32 }
+    }
+}
 
-        #[inline]
-        pub const fn set_biggest_sint(v: &mut AnyType, val: IntBiggest) {
-            v.sint64 = val;
-        }
+/// Writes the biggest signed integer field of the union.
+#[inline]
+pub const fn set_biggest_sint(v: &mut AnyType, val: IntBiggest) {
+    #[cfg(feature = "support_64bits")]
+    {
+        v.sint64 = val;
+    }
+    #[cfg(not(feature = "support_64bits"))]
+    {
+        v.sint32 = val;
+    }
+}
 
-        #[inline]
-        pub const fn set_biggest_uint(v: &mut AnyType, val: UintBiggest) {
-            v.uint64 = val;
-        }
+/// Writes the biggest unsigned integer field of the union.
+#[inline]
+pub const fn set_biggest_uint(v: &mut AnyType, val: UintBiggest) {
+    #[cfg(feature = "support_64bits")]
+    {
+        v.uint64 = val;
+    }
+    #[cfg(not(feature = "support_64bits"))]
+    {
+        v.uint32 = val;
+    }
+}
 
-        #[inline]
-        pub const fn set_biggest_float(v: &mut AnyType, val: FloatBiggest) {
-            v.float64 = val;
-        }
-
-    },
-    _ => {
-
-        #[must_use]
-        #[inline]
-        pub const fn read_biggest_uint(v: &AnyType) -> UintBiggest {
-            unsafe { v.uint32 }
-        }
-
-        #[must_use]
-        #[inline]
-        pub const fn read_biggest_sint(v: &AnyType) -> IntBiggest {
-            unsafe { v.sint32 }
-        }
-
-        #[must_use]
-        #[inline]
-        pub const fn read_biggest_float(v: &AnyType) -> FloatBiggest {
-            unsafe { v.float32 }
-        }
-
-        #[inline]
-        pub const fn set_biggest_sint(v: &mut AnyType, val: IntBiggest) {
-            v.sint32 = val;
-        }
-
-        #[inline]
-        pub const fn set_biggest_uint(v: &mut AnyType, val: UintBiggest) {
-            v.uint32 = val;
-        }
-
-        #[inline]
-        pub const fn set_biggest_float(v: &mut AnyType, val: FloatBiggest) {
-            v.float32 = val;
-        }
+/// Writes the biggest floating point field of the union.
+#[inline]
+pub const fn set_biggest_float(v: &mut AnyType, val: FloatBiggest) {
+    #[cfg(feature = "support_64bits")]
+    {
+        v.float64 = val;
+    }
+    #[cfg(not(feature = "support_64bits"))]
+    {
+        v.float32 = val;
     }
 }
 

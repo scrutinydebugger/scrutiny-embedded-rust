@@ -1,5 +1,3 @@
-use core::cfg_select;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum VariableTypeType {
@@ -74,24 +72,47 @@ pub union AnyType {
     pub float64: f64,
 }
 
-cfg_select! {
-    feature = "support_64bits" => {
-        pub type UintBiggest = u64;
-        pub type IntBiggest = i64;
-        pub type FloatBiggest = f64;
-        pub const BIGGEST_UINT: VariableType = VariableType::Uint64;
-        pub const BIGGEST_SINT: VariableType = VariableType::Sint64;
-        pub const BIGGEST_FLOAT: VariableType = VariableType::Float64;
-    },
-    _ => {
-        pub type UintBiggest = u32;
-        pub type IntBiggest = i32;
-        pub type FloatBiggest = f32;
-        pub const BIGGEST_UINT: VariableType = VariableType::Uint32;
-        pub const BIGGEST_SINT: VariableType = VariableType::Sint32;
-        pub const BIGGEST_FLOAT: VariableType = VariableType::Float32;
-    }
-}
+/// Largest supported unsigned integer type.
+#[cfg(feature = "support_64bits")]
+pub type UintBiggest = u64;
+/// Largest supported unsigned integer type.
+#[cfg(not(feature = "support_64bits"))]
+pub type UintBiggest = u32;
+
+/// Largest supported signed integer type.
+#[cfg(feature = "support_64bits")]
+pub type IntBiggest = i64;
+/// Largest supported signed integer type.
+#[cfg(not(feature = "support_64bits"))]
+pub type IntBiggest = i32;
+
+/// Largest supported floating point type.
+#[cfg(feature = "support_64bits")]
+pub type FloatBiggest = f64;
+/// Largest supported floating point type.
+#[cfg(not(feature = "support_64bits"))]
+pub type FloatBiggest = f32;
+
+/// `VariableType` matching [`UintBiggest`].
+#[cfg(feature = "support_64bits")]
+pub const BIGGEST_UINT: VariableType = VariableType::Uint64;
+/// `VariableType` matching [`UintBiggest`].
+#[cfg(not(feature = "support_64bits"))]
+pub const BIGGEST_UINT: VariableType = VariableType::Uint32;
+
+/// `VariableType` matching [`IntBiggest`].
+#[cfg(feature = "support_64bits")]
+pub const BIGGEST_SINT: VariableType = VariableType::Sint64;
+/// `VariableType` matching [`IntBiggest`].
+#[cfg(not(feature = "support_64bits"))]
+pub const BIGGEST_SINT: VariableType = VariableType::Sint32;
+
+/// `VariableType` matching [`FloatBiggest`].
+#[cfg(feature = "support_64bits")]
+pub const BIGGEST_FLOAT: VariableType = VariableType::Float64;
+/// `VariableType` matching [`FloatBiggest`].
+#[cfg(not(feature = "support_64bits"))]
+pub const BIGGEST_FLOAT: VariableType = VariableType::Float32;
 
 #[derive(Clone, Copy)]
 pub struct RuntimePublishedValue {

@@ -538,7 +538,7 @@ pub unsafe fn encode_response_memory_control_read(
 ) -> Result<u16, ResponseCode> {
     let block_header = ADDR_SIZE + 2;
 
-    if data.is_empty() || !data.len().is_multiple_of(block_header) {
+    if data.is_empty() || data.len() % block_header != 0 {
         return Err(ResponseCode::InvalidRequest);
     }
 
@@ -756,7 +756,7 @@ pub fn encode_response_memory_control_read_rpv(
     if data.is_empty() {
         return Err(ResponseCode::InvalidRequest);
     }
-    if !data.len().is_multiple_of(2) {
+    if data.len() % 2 != 0 {
         return Err(ResponseCode::InvalidRequest);
     }
 

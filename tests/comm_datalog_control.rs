@@ -117,8 +117,7 @@ enum DlSignal {
 }
 
 fn encode_usize_be(val: usize) -> Vec<u8> {
-    let size = core::mem::size_of::<usize>();
-    val.to_be_bytes()[8 - size..].to_vec()
+    val.to_be_bytes().to_vec()
 }
 
 fn encode_configure_payload(cfg: &DlConfig) -> Vec<u8> {
@@ -1768,7 +1767,7 @@ fn check_counter_entries(data: &[u8]) {
     let mut expected_offset: Option<u32> = None;
     let mut first_ts: Option<u32> = None;
     let mut last_ts = 0u32;
-    for (i, entry) in data.as_chunks::<8>().0.iter().enumerate() {
+    for (i, entry) in data.chunks_exact(8).enumerate() {
         let ts = u32::from_be_bytes([entry[0], entry[1], entry[2], entry[3]]);
         let val = u32::from_ne_bytes([entry[4], entry[5], entry[6], entry[7]]);
         let offset = val.wrapping_sub(ts);

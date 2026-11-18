@@ -133,8 +133,7 @@ fn resp_payload(resp: &[u8]) -> &[u8] {
 }
 
 fn encode_usize_be(val: usize) -> Vec<u8> {
-    let size = core::mem::size_of::<usize>();
-    val.to_be_bytes()[8 - size..].to_vec()
+    val.to_be_bytes().to_vec()
 }
 
 // Trigger when COUNTER > THRESHOLD on loop 0, log the loop time and COUNTER.

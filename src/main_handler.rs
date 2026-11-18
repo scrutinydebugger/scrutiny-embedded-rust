@@ -18,7 +18,7 @@ use crate::types::{RuntimePublishedValue, Timediff, Timestamp};
 use crate::types::AddressRange;
 
 #[cfg(feature = "datalogging")]
-use crate::datalogging::{DataLoggerCell, DataloggerHost, State as DlState};
+use crate::datalogging::{Configuration, DataLogger, DataLoggerCell, DataloggerHost, State as DlState};
 #[cfg(feature = "datalogging")]
 use crate::ipc::{Loop2MainMsgKind, Main2LoopMsg};
 #[cfg(feature = "datalogging")]
@@ -1053,263 +1053,310 @@ impl<'rxbuf, 'txbuf> MainHandler<'rxbuf, 'txbuf> {
         subfn_id: u8,
         data: &[u8],
     ) -> ResponseCode {
-        let host = RpvHost {
-            rpvs,
-            rpv_read_callback,
-        };
-
-        let code = match DataLogControlSubfn::try_from(subfn_id) {
-            Err(()) => return ResponseCode::UnsupportedFeature,
-
-            Ok(DataLogControlSubfn::GetSetup) => {
-                let buf_size = u32::try_from(cell.buffer_size()).unwrap_or(u32::MAX);
-                let encoding = crate::datalogging::RawFormatEncoder::get_encoding();
-                let max_signals = u8::try_from(crate::build_config::DATALOGGING_MAX_SIGNAL).unwrap_or(u8::MAX);
-                match encode_response_datalogging_get_setup(buf_size, encoding, max_signals, tx_buf) {
-                    Ok(len) => {
-                        comm.active_response_mut().data_length = len;
-                        ResponseCode::Ok
-                    }
-                    Err(e) => e,
-                }
-            }
-
+        match DataLogControlSubfn::try_from(subfn_id) {
+            Err(()) => ResponseCode::UnsupportedFeature,
+            Ok(DataLogControlSubfn::GetSetup) => Self::datalog_get_setup(comm, tx_buf, cell),
             Ok(DataLogControlSubfn::ConfigureDatalog) => {
-                dl.reading_in_progress = false;
-
-                if dl.owner.is_some() {
-                    if !dl.pending_release {
-                        dl.request_release = true;
-                    }
-                    return ResponseCode::ProcessAgain;
-                }
-
-                // Safety: no loop owns the datalogger right now.
-                let dl_obj = unsafe { cell.get() };
-
-                let parse_result = decode_datalogging_configure_request(data, dl_obj.config_mut());
-                let (loop_id, config_id) = match parse_result {
-                    Ok(ids) => ids,
-                    Err(e) => {
-                        dl_obj.reset();
-                        return e;
-                    }
+                let host = RpvHost {
+                    rpvs,
+                    rpv_read_callback,
                 };
-
-                let Some(loop_slice) = loops else {
-                    dl_obj.reset();
-                    return ResponseCode::FailureToProceed;
-                };
-                if loop_id as usize >= loop_slice.len() {
-                    dl_obj.reset();
-                    return ResponseCode::FailureToProceed;
-                }
-                if !loop_slice[loop_id as usize].datalogging_allowed() {
-                    dl_obj.reset();
-                    return ResponseCode::Forbidden;
-                }
-
-                // Validate forbidden regions for Var/VarBit operands and Memory items.
-                #[cfg(feature = "protected_regions")]
-                if let Some(forbidden) = forbidden_ranges {
-                    use crate::datalogging::types::{LoggableItem, Operand};
-                    use crate::tools::TypeSize;
-                    let config = dl_obj.config_ref();
-                    let mut region_err = false;
-                    'outer: for i in 0..config.trigger.operand_count as usize {
-                        let touches = match config.trigger.operands[i] {
-                            Operand::Var { addr, datatype } | Operand::VarBit { addr, datatype, .. } => {
-                                codec_v1_0::region_overlaps(addr as usize, datatype.type_size() as usize, forbidden)
-                            }
-                            _ => false,
-                        };
-                        if touches {
-                            region_err = true;
-                            break 'outer;
-                        }
-                    }
-                    if !region_err {
-                        for i in 0..config.items_count as usize {
-                            if let LoggableItem::Memory { address, size } = config.items_to_log[i] {
-                                if codec_v1_0::region_overlaps(address as usize, size as usize, forbidden) {
-                                    region_err = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if region_err {
-                        dl_obj.reset();
-                        return ResponseCode::Forbidden;
-                    }
-                }
-
-                // Validate RPV existence for Rpv operands and Rpv loggable items.
-                // Mirrors C++: RPV-not-found returns FailureToProceed (distinct from InvalidRequest
-                // for malformed payload / invalid condition).
-                {
-                    use crate::datalogging::types::{LoggableItem, Operand};
-                    let config = dl_obj.config_ref();
-                    let mut rpv_err = false;
-                    for i in 0..config.trigger.operand_count as usize {
-                        if let Operand::Rpv { id } = config.trigger.operands[i] {
-                            if !host.is_rpv_read_configured() || !host.rpv_exists(id) {
-                                rpv_err = true;
-                                break;
-                            }
-                        }
-                    }
-                    if !rpv_err {
-                        for i in 0..config.items_count as usize {
-                            if let LoggableItem::Rpv { id } = config.items_to_log[i] {
-                                if !host.is_rpv_read_configured() || !host.rpv_exists(id) {
-                                    rpv_err = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if rpv_err {
-                        dl_obj.reset();
-                        return ResponseCode::FailureToProceed;
-                    }
-                }
-
-                dl_obj.configure(config_id, &host);
-
-                if dl_obj.config_valid() {
-                    dl.pending_new_owner = Some(loop_id);
-                    ResponseCode::Ok
-                } else {
-                    dl_obj.reset();
-                    ResponseCode::InvalidRequest
-                }
+                Self::datalog_configure(
+                    cell,
+                    dl,
+                    loops,
+                    &host,
+                    #[cfg(feature = "protected_regions")]
+                    forbidden_ranges,
+                    data,
+                )
             }
-
-            Ok(DataLogControlSubfn::ArmTrigger) => {
-                if dl.owner.is_none() || dl.pending_release {
-                    return ResponseCode::FailureToProceed;
-                }
-                dl.request_arm = true;
-                ResponseCode::Ok
-            }
-
-            Ok(DataLogControlSubfn::DisarmTrigger) => {
-                if dl.owner.is_none() || dl.pending_release {
-                    return ResponseCode::FailureToProceed;
-                }
-                dl.request_disarm = true;
-                ResponseCode::Ok
-            }
-
-            Ok(DataLogControlSubfn::GetStatus) => {
-                let state = dl.cached_state as u8;
-                let bytes = u32::try_from(dl.cached_bytes_to_complete).unwrap_or(u32::MAX);
-                let counter = u32::try_from(dl.cached_write_counter).unwrap_or(u32::MAX);
-                match encode_response_datalogging_get_status(state, bytes, counter, tx_buf) {
-                    Ok(len) => {
-                        comm.active_response_mut().data_length = len;
-                        ResponseCode::Ok
-                    }
-                    Err(e) => e,
-                }
-            }
-
+            Ok(DataLogControlSubfn::ArmTrigger) => Self::datalog_arm_trigger(dl),
+            Ok(DataLogControlSubfn::DisarmTrigger) => Self::datalog_disarm_trigger(dl),
+            Ok(DataLogControlSubfn::GetStatus) => Self::datalog_get_status(comm, tx_buf, dl),
             Ok(DataLogControlSubfn::GetAcquisitionMetadata) => {
-                if dl.cached_state != DlState::AcquisitionCompleted {
-                    return ResponseCode::FailureToProceed;
-                }
-                if dl.owner.is_some() {
-                    // Loop still owns the datalogger; request a release that preserves the
-                    // acquisition data, then retry when ownership is gone.
-                    if !dl.pending_release {
-                        dl.reset_on_release = false;
-                        dl.request_release = true;
-                    }
-                    return ResponseCode::ProcessAgain;
-                }
-                // Safety: owner is None — no concurrent loop access.
-                let dl_obj = unsafe { cell.get() };
-                let acq_id = dl_obj.get_acquisition_id();
-                let config_id = dl_obj.get_config_id();
-                let entry_count = u32::try_from(dl_obj.get_encoder().get_entry_count()).unwrap_or(u32::MAX);
-                let data_size = u32::try_from(dl_obj.get_encoder().reader_total_size()).unwrap_or(u32::MAX);
-                let after_trigger = u32::try_from(dl_obj.log_points_after_trigger()).unwrap_or(u32::MAX);
-                match encode_response_datalogging_get_acquisition_metadata(
-                    acq_id,
-                    config_id,
-                    entry_count,
-                    data_size,
-                    after_trigger,
-                    tx_buf,
-                ) {
-                    Ok(len) => {
-                        comm.active_response_mut().data_length = len;
-                        ResponseCode::Ok
-                    }
-                    Err(e) => e,
-                }
+                Self::datalog_get_acquisition_metadata(comm, tx_buf, cell, dl)
             }
+            Ok(DataLogControlSubfn::ReadAcquisition) => Self::datalog_read_acquisition(comm, tx_buf, cell, dl),
+            Ok(DataLogControlSubfn::ResetDatalogger) => Self::datalog_reset(cell, dl),
+        }
+    }
 
-            Ok(DataLogControlSubfn::ReadAcquisition) => {
-                if dl.cached_state != DlState::AcquisitionCompleted {
-                    dl.reading_in_progress = false;
-                    return ResponseCode::FailureToProceed;
-                }
-                if dl.owner.is_some() {
-                    if !dl.pending_release {
-                        dl.reset_on_release = false;
-                        dl.request_release = true;
-                    }
-                    return ResponseCode::ProcessAgain;
-                }
-                // Safety: owner is None — no concurrent loop access.
-                let dl_obj = unsafe { cell.get() };
-                if !dl.reading_in_progress {
-                    dl_obj.get_encoder_mut().reset_reader();
-                    dl.reading_in_progress = true;
-                    dl.read_rolling_counter = 0;
-                    dl.read_crc = 0;
-                }
-                let acq_id = dl_obj.get_acquisition_id();
-                match encode_response_datalogging_read_acquisition(
-                    dl_obj.get_encoder_mut(),
-                    dl.read_rolling_counter,
-                    acq_id,
-                    &mut dl.read_crc,
-                    tx_buf,
-                ) {
-                    Ok((len, finished)) => {
-                        comm.active_response_mut().data_length = len;
-                        dl.read_rolling_counter = dl.read_rolling_counter.wrapping_add(1);
-                        if finished {
-                            dl.reading_in_progress = false;
-                        }
-                        ResponseCode::Ok
-                    }
-                    Err(e) => {
-                        dl.reading_in_progress = false;
-                        e
-                    }
-                }
-            }
-
-            Ok(DataLogControlSubfn::ResetDatalogger) => {
-                if dl.owner.is_some() {
-                    if !dl.pending_release {
-                        dl.request_release = true;
-                    }
-                    return ResponseCode::ProcessAgain;
-                }
-                // Safety: no loop owns the datalogger.
-                unsafe { cell.get() }.reset();
+    /// Sets the response length on success and converts the encoding result into a response code.
+    #[cfg(feature = "datalogging")]
+    const fn finish_datalog_response(comm: &mut CommHandler, result: Result<u16, ResponseCode>) -> ResponseCode {
+        match result {
+            Ok(len) => {
+                comm.active_response_mut().data_length = len;
                 ResponseCode::Ok
             }
-        };
+            Err(e) => e,
+        }
+    }
 
-        // On configure failure (not ProcessAgain), the datalogger has already been reset above.
-        let _ = host; // suppress unused warning
-        code
+    /// Returns true when no loop owns the datalogger. Otherwise, requests a release and returns false.
+    #[cfg(feature = "datalogging")]
+    const fn claim_datalogger(dl: &mut DataloggingState, keep_acquisition: bool) -> bool {
+        if dl.owner.is_none() {
+            return true;
+        }
+        if !dl.pending_release {
+            if keep_acquisition {
+                dl.reset_on_release = false;
+            }
+            dl.request_release = true;
+        }
+        false
+    }
+
+    #[cfg(feature = "datalogging")]
+    fn datalog_get_setup(comm: &mut CommHandler, tx_buf: &mut [u8], cell: &DataLoggerCell) -> ResponseCode {
+        let buf_size = u32::try_from(cell.buffer_size()).unwrap_or(u32::MAX);
+        let encoding = crate::datalogging::RawFormatEncoder::get_encoding();
+        let max_signals = u8::try_from(crate::build_config::DATALOGGING_MAX_SIGNAL).unwrap_or(u8::MAX);
+        let result = encode_response_datalogging_get_setup(buf_size, encoding, max_signals, tx_buf);
+        Self::finish_datalog_response(comm, result)
+    }
+
+    #[cfg(feature = "datalogging")]
+    fn datalog_configure(
+        cell: &DataLoggerCell,
+        dl: &mut DataloggingState,
+        loops: Option<&'static [&'static LoopHandler]>,
+        host: &RpvHost,
+        #[cfg(feature = "protected_regions")] forbidden_ranges: Option<&'static [AddressRange]>,
+        data: &[u8],
+    ) -> ResponseCode {
+        dl.reading_in_progress = false;
+        if !Self::claim_datalogger(dl, false) {
+            return ResponseCode::ProcessAgain;
+        }
+
+        // Safety: no loop owns the datalogger right now.
+        let dl_obj = unsafe { cell.get() };
+        let result = Self::datalog_apply_configuration(
+            dl_obj,
+            loops,
+            host,
+            #[cfg(feature = "protected_regions")]
+            forbidden_ranges,
+            data,
+        );
+        match result {
+            Ok(loop_id) => {
+                dl.pending_new_owner = Some(loop_id);
+                ResponseCode::Ok
+            }
+            Err(e) => {
+                dl_obj.reset();
+                e
+            }
+        }
+    }
+
+    /// Decodes, validates and applies a configuration. Returns the loop that must take ownership.
+    #[cfg(feature = "datalogging")]
+    fn datalog_apply_configuration(
+        dl_obj: &mut DataLogger,
+        loops: Option<&'static [&'static LoopHandler]>,
+        host: &RpvHost,
+        #[cfg(feature = "protected_regions")] forbidden_ranges: Option<&'static [AddressRange]>,
+        data: &[u8],
+    ) -> Result<u8, ResponseCode> {
+        let (loop_id, config_id) = decode_datalogging_configure_request(data, dl_obj.config_mut())?;
+
+        let Some(loop_slice) = loops else {
+            return Err(ResponseCode::FailureToProceed);
+        };
+        let Some(loop_handler) = loop_slice.get(usize::from(loop_id)) else {
+            return Err(ResponseCode::FailureToProceed);
+        };
+        if !loop_handler.datalogging_allowed() {
+            return Err(ResponseCode::Forbidden);
+        }
+
+        #[cfg(feature = "protected_regions")]
+        if let Some(forbidden) = forbidden_ranges {
+            if Self::config_touches_forbidden_region(dl_obj.config_ref(), forbidden) {
+                return Err(ResponseCode::Forbidden);
+            }
+        }
+
+        // Mirrors C++: RPV-not-found returns FailureToProceed (distinct from InvalidRequest
+        // for malformed payload / invalid condition).
+        if Self::config_has_missing_rpv(dl_obj.config_ref(), host) {
+            return Err(ResponseCode::FailureToProceed);
+        }
+
+        dl_obj.configure(config_id, host);
+        if !dl_obj.config_valid() {
+            return Err(ResponseCode::InvalidRequest);
+        }
+        Ok(loop_id)
+    }
+
+    /// Returns true if a Var/VarBit operand or a Memory item overlaps a forbidden region.
+    #[cfg(all(feature = "datalogging", feature = "protected_regions"))]
+    fn config_touches_forbidden_region(config: &Configuration, forbidden: &[AddressRange]) -> bool {
+        use crate::datalogging::types::{LoggableItem, Operand};
+        use crate::tools::TypeSize;
+
+        for i in 0..config.trigger.operand_count as usize {
+            let touches = match config.trigger.operands[i] {
+                Operand::Var { addr, datatype } | Operand::VarBit { addr, datatype, .. } => {
+                    codec_v1_0::region_overlaps(addr as usize, datatype.type_size() as usize, forbidden)
+                }
+                _ => false,
+            };
+            if touches {
+                return true;
+            }
+        }
+        for i in 0..config.items_count as usize {
+            if let LoggableItem::Memory { address, size } = config.items_to_log[i] {
+                if codec_v1_0::region_overlaps(address as usize, size as usize, forbidden) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Returns true if an Rpv operand or an Rpv item cannot be read.
+    #[cfg(feature = "datalogging")]
+    fn config_has_missing_rpv(config: &Configuration, host: &RpvHost) -> bool {
+        use crate::datalogging::types::{LoggableItem, Operand};
+
+        for i in 0..config.trigger.operand_count as usize {
+            if let Operand::Rpv { id } = config.trigger.operands[i] {
+                if !host.is_rpv_read_configured() || !host.rpv_exists(id) {
+                    return true;
+                }
+            }
+        }
+        for i in 0..config.items_count as usize {
+            if let LoggableItem::Rpv { id } = config.items_to_log[i] {
+                if !host.is_rpv_read_configured() || !host.rpv_exists(id) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[cfg(feature = "datalogging")]
+    const fn datalog_arm_trigger(dl: &mut DataloggingState) -> ResponseCode {
+        if dl.owner.is_none() || dl.pending_release {
+            return ResponseCode::FailureToProceed;
+        }
+        dl.request_arm = true;
+        ResponseCode::Ok
+    }
+
+    #[cfg(feature = "datalogging")]
+    const fn datalog_disarm_trigger(dl: &mut DataloggingState) -> ResponseCode {
+        if dl.owner.is_none() || dl.pending_release {
+            return ResponseCode::FailureToProceed;
+        }
+        dl.request_disarm = true;
+        ResponseCode::Ok
+    }
+
+    #[cfg(feature = "datalogging")]
+    fn datalog_get_status(comm: &mut CommHandler, tx_buf: &mut [u8], dl: &DataloggingState) -> ResponseCode {
+        let state = dl.cached_state as u8;
+        let bytes = u32::try_from(dl.cached_bytes_to_complete).unwrap_or(u32::MAX);
+        let counter = u32::try_from(dl.cached_write_counter).unwrap_or(u32::MAX);
+        let result = encode_response_datalogging_get_status(state, bytes, counter, tx_buf);
+        Self::finish_datalog_response(comm, result)
+    }
+
+    #[cfg(feature = "datalogging")]
+    fn datalog_get_acquisition_metadata(
+        comm: &mut CommHandler,
+        tx_buf: &mut [u8],
+        cell: &DataLoggerCell,
+        dl: &mut DataloggingState,
+    ) -> ResponseCode {
+        if dl.cached_state != DlState::AcquisitionCompleted {
+            return ResponseCode::FailureToProceed;
+        }
+        // Release while preserving the acquisition data, then retry when ownership is gone.
+        if !Self::claim_datalogger(dl, true) {
+            return ResponseCode::ProcessAgain;
+        }
+        // Safety: owner is None — no concurrent loop access.
+        let dl_obj = unsafe { cell.get() };
+        let acq_id = dl_obj.get_acquisition_id();
+        let config_id = dl_obj.get_config_id();
+        let entry_count = u32::try_from(dl_obj.get_encoder().get_entry_count()).unwrap_or(u32::MAX);
+        let data_size = u32::try_from(dl_obj.get_encoder().reader_total_size()).unwrap_or(u32::MAX);
+        let after_trigger = u32::try_from(dl_obj.log_points_after_trigger()).unwrap_or(u32::MAX);
+        let result = encode_response_datalogging_get_acquisition_metadata(
+            acq_id,
+            config_id,
+            entry_count,
+            data_size,
+            after_trigger,
+            tx_buf,
+        );
+        Self::finish_datalog_response(comm, result)
+    }
+
+    #[cfg(feature = "datalogging")]
+    fn datalog_read_acquisition(
+        comm: &mut CommHandler,
+        tx_buf: &mut [u8],
+        cell: &DataLoggerCell,
+        dl: &mut DataloggingState,
+    ) -> ResponseCode {
+        if dl.cached_state != DlState::AcquisitionCompleted {
+            dl.reading_in_progress = false;
+            return ResponseCode::FailureToProceed;
+        }
+        if !Self::claim_datalogger(dl, true) {
+            return ResponseCode::ProcessAgain;
+        }
+        // Safety: owner is None — no concurrent loop access.
+        let dl_obj = unsafe { cell.get() };
+        if !dl.reading_in_progress {
+            dl_obj.get_encoder_mut().reset_reader();
+            dl.reading_in_progress = true;
+            dl.read_rolling_counter = 0;
+            dl.read_crc = 0;
+        }
+        let acq_id = dl_obj.get_acquisition_id();
+        let result = encode_response_datalogging_read_acquisition(
+            dl_obj.get_encoder_mut(),
+            dl.read_rolling_counter,
+            acq_id,
+            &mut dl.read_crc,
+            tx_buf,
+        );
+        match result {
+            Ok((len, finished)) => {
+                comm.active_response_mut().data_length = len;
+                dl.read_rolling_counter = dl.read_rolling_counter.wrapping_add(1);
+                if finished {
+                    dl.reading_in_progress = false;
+                }
+                ResponseCode::Ok
+            }
+            Err(e) => {
+                dl.reading_in_progress = false;
+                e
+            }
+        }
+    }
+
+    #[cfg(feature = "datalogging")]
+    fn datalog_reset(cell: &DataLoggerCell, dl: &mut DataloggingState) -> ResponseCode {
+        if !Self::claim_datalogger(dl, false) {
+            return ResponseCode::ProcessAgain;
+        }
+        // Safety: no loop owns the datalogger.
+        unsafe { cell.get() }.reset();
+        ResponseCode::Ok
     }
 }
 

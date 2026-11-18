@@ -81,7 +81,7 @@ fn resp_payload(resp: &[u8]) -> &[u8] {
     &resp[5..5 + len]
 }
 
-// ── Wire format helpers ───────────────────────────────────────────────────────
+// Wire format helpers
 
 struct DlConfig {
     loop_id: u8,
@@ -294,22 +294,15 @@ fn run_until_acquisition(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLo
     panic!("Acquisition did not complete within 500 iterations");
 }
 
-// Send a DataLogControl request that may trigger a release-for-read IPC roundtrip
-// (e.g. GetAcquisitionMetadata or ReadAcquisition while a loop still owns the datalogger).
-// Returns the response. Drives any ProcessAgain / release handshake transparently.
+// Sends a DataLogControl request and drives the release-for-read handshake if a loop owns the datalogger.
 fn send_and_recv_with_release(h: &mut MainHandler<'_, '_>, loop_handler: &impl TestLoop, req: &[u8]) -> Vec<u8> {
     h.receive_data(req);
-    // First tick: dispatch; on ProcessAgain, main-handler sets request_release=true and the
-    // ReleaseOwnership IPC is sent at the end of this process() call.
-    h.process(0);
+    h.process(0); // Answers directly, or sends ReleaseOwnership
     if h.data_to_send() > 0 {
         return pop_response(h);
     }
-    // Loop acknowledges the release.
     loop_handler.process_with_time(0);
-    // Next tick: main receives OwnershipReleased (owner=None, data preserved because
-    // reset_on_release was false); the request is re-dispatched and the response is queued.
-    h.process(0);
+    h.process(0); // Receives OwnershipReleased with data preserved, then answers
     pop_response(h)
 }
 
@@ -327,11 +320,11 @@ fn make_handler_with_loops<'rx, 'tx>(
     MainHandler::new(cfg).unwrap()
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// Tests
 
 #[test]
 fn test_unsupported() {
-    // Handler with no dl buffer — DataLogControl returns UnsupportedFeature for all subfns
+    // Handler with no dl buffer: DataLogControl returns UnsupportedFeature for all subfns
     static LOOP1: FixedFreqLoopHandler = FixedFreqLoopHandler::new("L", 100);
     static UNSUP_LOOPS: [&LoopHandler; 1] = [LOOP1.handler()];
     let mut rx = [0u8; 128];
@@ -902,7 +895,7 @@ fn test_configure_operand_varbit_almost_in_forbidden_region() {
     let mut h = MainHandler::new(cfg).unwrap();
     connect(&mut h);
 
-    // VarBit at index 2, type uint16 (2 bytes), touching indices 2..4 — does NOT overlap [4..6]
+    // VarBit at index 2, type uint16 (2 bytes), touching indices 2..4, does not overlap [4..6]
     let mut dl_cfg = get_valid_reference_config();
     dl_cfg.operands[1] = DlOperand::VarBit {
         addr: unsafe { ALMOST_FORBIDDEN_BUFFER.as_ptr().add(2) as usize },
@@ -1082,7 +1075,7 @@ fn test_owner_mechanism() {
     run_until_acquisition(&mut h, loop0);
     assert_eq!(get_status_state(&mut h), DlState::AcquisitionCompleted as u8);
 
-    // Now re-configure to loop1 — this requires releasing ownership from loop0
+    // Re-configure to loop1, which requires loop0 to release ownership
     let cfg1 = get_simple_trigger_config(1);
     let payload = encode_configure_payload(&cfg1);
     let req = make_request(
@@ -1091,14 +1084,13 @@ fn test_owner_mechanism() {
         &payload,
     );
 
-    // Feed the request — it will ProcessAgain until loop0 releases
     h.receive_data(&req);
-    h.process(0); // sets pending_release, returns ProcessAgain — no response yet
+    h.process(0); // sets pending_release, returns ProcessAgain, no response yet
 
     // Loop0 must release first
     h.process(0); // sends ReleaseOwnership IPC
     loop0.process_with_time(0); // receives ReleaseOwnership, sends OwnershipReleased
-    h.process(0); // receives OwnershipReleased (dl.owner = None), retries configure → Ok
+    h.process(0); // receives OwnershipReleased (dl.owner = None), retries configure -> Ok
 
     let resp = pop_response(&mut h);
     h.process(0);
@@ -1557,7 +1549,7 @@ fn test_reset_datalogger() {
     // Loop must release before reset proceeds
     h.process(0); // sends ReleaseOwnership IPC
     loop0.process_with_time(0); // receives ReleaseOwnership, sends OwnershipReleased
-    h.process(1); // receives OwnershipReleased, retries Reset → Ok
+    h.process(1); // receives OwnershipReleased, retries Reset -> Ok
     h.process(0); // allow sending
 
     let resp = pop_response(&mut h);
@@ -1675,7 +1667,7 @@ fn test_process_again_completes_before_timeout() {
     assert_eq!(get_status_state(&mut h), DlState::Idle as u8);
 }
 
-// ── Read-with-release flow (D-03) ─────────────────────────────────────────────
+// Read-with-release flow (D-03)
 
 // AlwaysTrue trigger on loop 0 that logs the loop time and a u32 counter.
 fn get_counter_trigger_config(counter: &AtomicU32) -> DlConfig {

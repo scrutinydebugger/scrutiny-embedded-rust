@@ -10,7 +10,7 @@ use crate::types::{
     BIGGEST_UINT,
 };
 
-// ── Host interface ────────────────────────────────────────────────────────────
+// Host interface
 
 /// Interface that the `DataLogger` needs from the host application.
 pub(crate) trait DataloggerHost {
@@ -39,7 +39,7 @@ pub(crate) trait DataloggerHost {
     }
 }
 
-// ── DataLogger state machine ──────────────────────────────────────────────────
+// DataLogger state machine
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -145,14 +145,12 @@ impl DataLogger {
         self.config_valid = true;
         self.config_id = config_id;
 
-        // Validate items_count.
         if self.config.items_count == 0
             || self.config.items_count as usize > crate::build_config::DATALOGGING_MAX_SIGNAL
         {
             self.config_valid = false;
         }
 
-        // Validate operand_count.
         if self.config.trigger.operand_count as usize > MAX_OPERANDS {
             self.config_valid = false;
         }
@@ -164,7 +162,6 @@ impl DataLogger {
             self.config_valid = false;
         }
 
-        // Decimation must be non-zero.
         if self.config.decimation == 0 {
             self.config_valid = false;
         }
@@ -339,7 +336,7 @@ impl DataLogger {
         false
     }
 
-    // ── Accessors ─────────────────────────────────────────────────────────────
+    // Accessors
 
     /// Total byte capacity of the acquisition buffer.
     #[must_use]
@@ -445,7 +442,7 @@ impl DataLogger {
         &self.encoder
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // Private helpers
 
     fn process_acquisition(&mut self, timebase: &Timebase, host: &dyn DataloggerHost) {
         self.decimation_counter += 1;
@@ -461,8 +458,8 @@ impl DataLogger {
         self.encoder.reset_write_counter();
 
         // How much data to record after the trigger, based on probe_location:
-        //   probe_location=0   → write ≈ buffer_size after trigger (trigger near start)
-        //   probe_location=255 → write ≈ 0 after trigger (trigger near end)
+        //   probe_location=0   -> write ~ buffer_size after trigger (trigger near start)
+        //   probe_location=255 -> write ~ 0 after trigger (trigger near end)
         let multiplier = u64::from(255u8 - self.config.probe_location);
         let remaining = ((self.buffer_size as u64 * multiplier) >> 8) as usize;
 
@@ -496,7 +493,7 @@ impl DataLogger {
     }
 }
 
-// ── Free helpers ──────────────────────────────────────────────────────────────
+// Free helpers
 
 /// Reads one operand and stores value + type in `out`.
 /// Returns `false` on failure (bad operand type, RPV not found, etc.).
@@ -731,9 +728,9 @@ pub fn convert_to_compare_type(pair: &mut AnyValAndTypePair) {
     }
 }
 
-// ── Private free helpers ──────────────────────────────────────────────────────
+// Private free helpers
 
-/// Returns the smallest `VariableTypeSize` variant whose byte count is ≥ `size_bytes`.
+/// Returns the smallest `VariableTypeSize` variant whose byte count is >= `size_bytes`.
 const fn required_type_size_bytes(size_bytes: u8) -> crate::types::VariableTypeSize {
     use crate::types::VariableTypeSize;
     match size_bytes {
@@ -1052,7 +1049,7 @@ mod tests {
         }
         dl.configure(0, &host);
 
-        // Not armed — data is NOT acquired even after many ticks.
+        // Not armed: no data is acquired even after many ticks.
         dl.process(&tb, &host);
         tb.step(100);
         dl.process(&tb, &host);
@@ -1208,7 +1205,7 @@ mod tests {
             assert_eq!(
                 ts_cur.wrapping_sub(ts_prev),
                 5,
-                "entry #{idx}: expected Δtime=5, got {}",
+                "entry #{idx}: expected delta time=5, got {}",
                 ts_cur.wrapping_sub(ts_prev)
             );
         }
@@ -1383,7 +1380,7 @@ mod tests {
             let diff = trigger_location.abs_diff(expected_trigger_loc);
             assert!(
                 diff <= 2,
-                "probe_location={probe_location}: trigger at entry {trigger_location}, expected ≈{expected_trigger_loc} (diff={diff})"
+                "probe_location={probe_location}: trigger at entry {trigger_location}, expected ~{expected_trigger_loc} (diff={diff})"
             );
 
             // Verify values near the trigger point.
@@ -1409,7 +1406,7 @@ mod tests {
         }
     }
 
-    // ── fetch_operand tests (from datalogging_fetch_operands.rs) ─────────────
+    // fetch_operand tests
 
     static FETCH_TEST_RPVS: [RuntimePublishedValue; 2] = [
         RuntimePublishedValue {
@@ -1586,49 +1583,49 @@ mod tests {
 
         let mut pair = AnyValAndTypePair::DEFAULT;
 
-        // Sint8 → sign-extend to BIGGEST_SINT
+        // Sint8 -> sign-extend to BIGGEST_SINT
         pair.valtype = VariableType::Sint8;
         pair.val = AnyType { sint8: -50 };
         convert_to_compare_type(&mut pair);
         assert_eq!(pair.valtype, BIGGEST_SINT);
         assert_eq!(crate::tools::read_biggest_sint(&pair.val), -50 as IntBiggest);
 
-        // Sint16 → sign-extend
+        // Sint16 -> sign-extend
         pair.valtype = VariableType::Sint16;
         pair.val = AnyType { sint16: -1000 };
         convert_to_compare_type(&mut pair);
         assert_eq!(pair.valtype, BIGGEST_SINT);
         assert_eq!(crate::tools::read_biggest_sint(&pair.val), -1000 as IntBiggest);
 
-        // Sint32 → sign-extend
+        // Sint32 -> sign-extend
         pair.valtype = VariableType::Sint32;
         pair.val = AnyType { sint32: -100_000 };
         convert_to_compare_type(&mut pair);
         assert_eq!(pair.valtype, BIGGEST_SINT);
         assert_eq!(crate::tools::read_biggest_sint(&pair.val), -100_000 as IntBiggest);
 
-        // Uint8 → zero-extend to BIGGEST_UINT
+        // Uint8 -> zero-extend to BIGGEST_UINT
         pair.valtype = VariableType::Uint8;
         pair.val = AnyType { uint8: 50 };
         convert_to_compare_type(&mut pair);
         assert_eq!(pair.valtype, BIGGEST_UINT);
         assert_eq!(crate::tools::read_biggest_uint(&pair.val), 50 as UintBiggest);
 
-        // Uint16 → zero-extend
+        // Uint16 -> zero-extend
         pair.valtype = VariableType::Uint16;
         pair.val = AnyType { uint16: 1000 };
         convert_to_compare_type(&mut pair);
         assert_eq!(pair.valtype, BIGGEST_UINT);
         assert_eq!(crate::tools::read_biggest_uint(&pair.val), 1000 as UintBiggest);
 
-        // Uint32 → zero-extend
+        // Uint32 -> zero-extend
         pair.valtype = VariableType::Uint32;
         pair.val = AnyType { uint32: 100_000 };
         convert_to_compare_type(&mut pair);
         assert_eq!(pair.valtype, BIGGEST_UINT);
         assert_eq!(crate::tools::read_biggest_uint(&pair.val), 100_000 as UintBiggest);
 
-        // Float32 → unchanged
+        // Float32 -> unchanged
         pair.valtype = VariableType::Float32;
         pair.val = AnyType {
             float32: 3.141_592_6_f32,
@@ -1655,7 +1652,7 @@ mod tests {
             assert_eq!(pair.valtype, BIGGEST_SINT);
             assert_eq!(crate::tools::read_biggest_sint(&pair.val), -0x0001_2345_6789_abcd_i64);
 
-            // Float64 → truncated to Float32
+            // Float64 -> truncated to Float32
             pair.valtype = VariableType::Float64;
             pair.val = AnyType {
                 float64: f64::from(3.141_592_6_f32),
@@ -1680,10 +1677,10 @@ mod tests {
             bitsize,
         };
 
-        // bitoffset=31, bitsize=1 → reads a single bit from a 32-bit word: valid
+        // bitoffset=31, bitsize=1 -> reads a single bit from a 32-bit word: valid
         assert!(fetch_operand(&host, &make(31, 1), &mut out));
 
-        // bitoffset=32, bitsize=1 → needs a 64-bit read
+        // bitoffset=32, bitsize=1 -> needs a 64-bit read
         {
             let result = fetch_operand(&host, &make(32, 1), &mut out);
             #[cfg(feature = "support_64bits")]
@@ -1692,10 +1689,10 @@ mod tests {
             assert!(!result);
         }
 
-        // bitoffset=0, bitsize=32 → valid 32-bit field
+        // bitoffset=0, bitsize=32 -> valid 32-bit field
         assert!(fetch_operand(&host, &make(0, 32), &mut out));
 
-        // bitoffset=0, bitsize=33 → needs 64 bits
+        // bitoffset=0, bitsize=33 -> needs 64 bits
         {
             let result = fetch_operand(&host, &make(0, 33), &mut out);
             #[cfg(feature = "support_64bits")]
@@ -1704,7 +1701,7 @@ mod tests {
             assert!(!result);
         }
 
-        // bitoffset=63, bitsize=1 → needs 64-bit read
+        // bitoffset=63, bitsize=1 -> needs 64-bit read
         {
             let result = fetch_operand(&host, &make(63, 1), &mut out);
             #[cfg(feature = "support_64bits")]
@@ -1713,10 +1710,10 @@ mod tests {
             assert!(!result);
         }
 
-        // bitoffset=64 → always invalid (exceeds UintBiggest width)
+        // bitoffset=64 -> always invalid (exceeds UintBiggest width)
         assert!(!fetch_operand(&host, &make(64, 1), &mut out));
 
-        // bitoffset=0, bitsize=64 → needs 64-bit read
+        // bitoffset=0, bitsize=64 -> needs 64-bit read
         {
             let result = fetch_operand(&host, &make(0, 64), &mut out);
             #[cfg(feature = "support_64bits")]
@@ -1725,10 +1722,10 @@ mod tests {
             assert!(!result);
         }
 
-        // bitoffset=0, bitsize=65 → always invalid
+        // bitoffset=0, bitsize=65 -> always invalid
         assert!(!fetch_operand(&host, &make(0, 65), &mut out));
 
-        // bitsize=0 → always invalid
+        // bitsize=0 -> always invalid
         assert!(!fetch_operand(&host, &make(0, 0), &mut out));
     }
 

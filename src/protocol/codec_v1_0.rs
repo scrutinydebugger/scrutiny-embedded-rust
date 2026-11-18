@@ -79,7 +79,6 @@ const MAX_DISPLAY_NAME_LENGTH: u8 = 64;
 const MAX_LOOP_NAME_LENGTH: u8 = 32;
 
 /// Encodes a `CommControl/Discover` response payload into `tx_buf`.
-/// Returns `Ok(data_length)` on success, or `Err(ResponseCode)` on failure.
 ///
 /// # Errors
 /// Returns `Err(ResponseCode::InvalidRequest)` if `data` is not `DISCOVER_MAGIC`,
@@ -116,7 +115,6 @@ pub fn encode_response_comm_discover(
 }
 
 /// Encodes a `CommControl/Heartbeat` response payload into `tx_buf`.
-/// Returns `Ok(data_length)` on success, or `Err(ResponseCode)` on failure.
 ///
 /// # Errors
 /// Returns `Err(ResponseCode::Overflow)` if `tx_buf` is too small.
@@ -135,7 +133,6 @@ pub fn encode_response_comm_heartbeat(
 }
 
 /// Encodes a `CommControl/GetParams` response payload into `tx_buf`.
-/// Returns `Ok(data_length)` on success, or `Err(ResponseCode)` on failure.
 ///
 /// # Errors
 /// Returns `Err(ResponseCode::Overflow)` if `tx_buf` is too small.
@@ -166,7 +163,6 @@ pub fn encode_response_comm_get_params(
 
 /// Encodes a `CommControl/Connect` response payload into `tx_buf`.
 /// Payload: `CONNECT_MAGIC`(4) + `session_id`(4) = 8 bytes.
-/// Returns `Ok(data_length)` on success, or `Err(ResponseCode)` on failure.
 ///
 /// # Errors
 /// Returns `Err(ResponseCode::Overflow)` if `tx_buf` is too small.
@@ -180,7 +176,7 @@ pub fn encode_response_comm_connect(session_id: u32, tx_buf: &mut [u8]) -> Resul
     Ok(DATALEN)
 }
 
-// ===== GetInfo encoders =====
+// GetInfo encoders
 
 /// Encodes a `GetInfo/GetProtocolVersion` response: major(1) + minor(1).
 ///
@@ -269,7 +265,7 @@ pub fn encode_response_get_info_special_memory_region_location(
     }
     tx_buf[0] = region_type;
     tx_buf[1] = region_index;
-    // Safety: casting a raw pointer to usize is defined — it gives the numeric address.
+    // Safety: casting a raw pointer to usize gives its numeric address.
     let start_bytes = (start as usize).to_be_bytes();
     let end_bytes = (end as usize).to_be_bytes();
     tx_buf[2..2 + addr_size].copy_from_slice(&start_bytes);
@@ -309,7 +305,7 @@ pub fn encode_response_get_info_rpv_definitions(
         if cursor + 3 > tx_buf.len() {
             return Err(ResponseCode::Overflow);
         }
-        // In Rust, bool is always 1 byte — map Boolean to Boolean8 for the protocol.
+        // A Rust bool is 1 byte, so Boolean is reported as Boolean8.
         let var_type = if rpv.var_type == VariableType::Boolean {
             VariableType::Boolean8
         } else {
@@ -385,7 +381,7 @@ pub fn encode_response_get_info_loop_definition(
     Ok(u16::try_from(cursor).unwrap_or(u16::MAX))
 }
 
-/// Returns the byte size of a `VariableType` as reported by the protocol (Boolean → 1).
+/// Returns the byte size of a `VariableType` as reported by the protocol (Boolean -> 1).
 #[must_use]
 pub fn protocol_type_size(vt: VariableType) -> u8 {
     if vt == VariableType::Boolean {
@@ -395,7 +391,7 @@ pub fn protocol_type_size(vt: VariableType) -> u8 {
     }
 }
 
-// ===== MemoryControl request parsers =====
+// MemoryControl request parsers
 
 /// Iterates over `[address(ADDR_SIZE) + length(2)]` blocks in a `MemoryControl/Read` request.
 struct ReadBlockParser<'a> {
@@ -516,7 +512,7 @@ impl<'a> Iterator for WriteBlockParser<'a> {
     }
 }
 
-// ===== MemoryControl encoders =====
+// MemoryControl encoders
 
 /// Encodes a `MemoryControl/Read` response.
 ///
@@ -543,8 +539,8 @@ pub unsafe fn encode_response_memory_control_read(
     }
 
     // Pass 1: validate and compute required TX size. No memory access.
-    // Two-level check: exceeding the protocol maximum → InvalidRequest;
-    // fitting within the protocol but not in this device's buffer → Overflow.
+    // Two-level check: exceeding the protocol maximum -> InvalidRequest;
+    // fitting within the protocol but not in this device's buffer -> Overflow.
     let protocol_max = usize::from(MAXIMUM_TX_BUFFER_SIZE);
     let required_tx = ReadBlockParser::new(data).try_fold(0usize, |acc, item| {
         let (_, len) = item?;
@@ -833,7 +829,7 @@ pub fn encode_response_memory_control_write_rpv(
         offset += 2;
 
         let Some(rpv) = find_rpv(id, rpvs) else {
-            // Can't determine how many bytes follow — parsing is impossible.
+            // Unknown RPV size, parsing cannot continue.
             return Err(ResponseCode::InvalidRequest);
         };
 
@@ -864,7 +860,7 @@ pub fn encode_response_memory_control_write_rpv(
     Ok(u16::try_from(tx_cursor).unwrap_or(u16::MAX))
 }
 
-// ===== DataLogControl encoders / decoders =====
+// DataLogControl encoders / decoders
 
 #[cfg(feature = "datalogging")]
 use crate::datalogging::{

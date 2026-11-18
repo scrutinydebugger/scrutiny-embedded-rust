@@ -15,7 +15,7 @@ pub struct RawFormatEncoder {
     entry_size: usize,
     full: bool,
     error: bool,
-    // ── Reader state ──────────────────────────────────────────────────────────
+    // Reader state
     reader_cursor: usize,
     reader_started: bool,
     reader_finished: bool,
@@ -163,7 +163,7 @@ impl RawFormatEncoder {
         self.entry_write_counter += 1;
     }
 
-    // ── Accessors ─────────────────────────────────────────────────────────────
+    // Accessors
 
     #[must_use]
     #[inline]
@@ -252,7 +252,7 @@ impl RawFormatEncoder {
         }
     }
 
-    // ── Reader ────────────────────────────────────────────────────────────────
+    // Reader
 
     /// Resets the reader to the start of the acquisition data.
     pub const fn reset_reader(&mut self) {
@@ -339,7 +339,7 @@ impl RawFormatEncoder {
     }
 }
 
-// ── Big-endian encoding helper ────────────────────────────────────────────────
+// Big-endian encoding helper
 
 /// Encodes `val` of `var_type` as big-endian bytes into `dst`.
 /// Returns the number of bytes written (= `var_type.type_size()`).
@@ -392,7 +392,7 @@ fn encode_anytype_be(val: AnyType, var_type: VariableType, dst: &mut [u8]) -> us
                 dst[..8].copy_from_slice(&val.float64.to_bits().to_be_bytes());
                 8
             }
-            _ => var_type.type_size() as usize, // 0 for unknown — no-op
+            _ => var_type.type_size() as usize, // 0 for unknown, no-op
         }
     }
 }
@@ -553,7 +553,7 @@ mod tests {
             size: 4,
         };
 
-        // Buffer holds only 4 bytes — not enough for one 8-byte entry.
+        // Buffer holds only 4 bytes, not enough for one 8-byte entry.
         let mut small_buf = [0u8; 4];
         // Safety: small_buf outlives enc.
         let mut enc = unsafe { RawFormatEncoder::new(small_buf.as_mut_ptr(), small_buf.len()) };

@@ -35,7 +35,7 @@ pub(crate) type DataloggerBufDesc = (*mut u8, usize, Option<DataloggingTriggerCa
 /// Runtime configuration handed to `MainHandler` at startup.
 ///
 /// Caller-allocated buffers are borrowed for lifetime `'buf`; all array pointers
-/// (`rpvs`, address ranges) must be `'static` — no copy is made.
+/// (`rpvs`, address ranges) must be `'static`, no copy is made.
 pub struct Config<'rxbuf, 'txbuf> {
     rx_buffer: Option<&'rxbuf mut [u8]>,
     tx_buffer: Option<&'txbuf mut [u8]>,

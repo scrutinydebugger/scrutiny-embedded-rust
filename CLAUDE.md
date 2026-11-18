@@ -1,4 +1,4 @@
-# CLAUDE.md — scrutiny-embedded-rust
+# CLAUDE.md - scrutiny-embedded-rust
 
 ## Project
 

@@ -901,14 +901,14 @@ fn rpv_read_cb(rpv: RuntimePublishedValue, out: &mut AnyType, _caller: Option<&'
     }
 }
 
-fn rpv_write_cb_ok(rpv: RuntimePublishedValue, val: &AnyType) -> bool {
-    // Store value for verification via thread-local or similar.
-    // We just check the callback was called correctly by the return value.
+fn rpv_write_cb_ok(rpv: RuntimePublishedValue, val: &AnyType, caller: Option<&'static str>) -> bool {
+    // Writes always come from the main handler.
+    assert!(caller.is_none());
     let _ = (rpv, val);
     true
 }
 
-fn rpv_write_cb_fail(_rpv: RuntimePublishedValue, _val: &AnyType) -> bool {
+fn rpv_write_cb_fail(_rpv: RuntimePublishedValue, _val: &AnyType, _caller: Option<&'static str>) -> bool {
     false
 }
 
@@ -1439,7 +1439,7 @@ struct AllTypeResult {
 // Only test_write_rpv_all_types writes here; the Mutex keeps the access safe.
 static ALL_TYPE_WRITE_RESULT: std::sync::Mutex<Option<AllTypeResult>> = std::sync::Mutex::new(None);
 
-fn rpv_write_all_types_cb(rpv: RuntimePublishedValue, val: &AnyType) -> bool {
+fn rpv_write_all_types_cb(rpv: RuntimePublishedValue, val: &AnyType, _caller: Option<&'static str>) -> bool {
     let mut guard = ALL_TYPE_WRITE_RESULT.lock().unwrap();
     let dest = guard.get_or_insert_with(AllTypeResult::default);
     unsafe {

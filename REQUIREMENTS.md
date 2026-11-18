@@ -95,6 +95,40 @@ Rust port of the scrutiny-embedded C++ instrumentation library.
 
 ---
 
+## C++ Implementation Divergence
+
+The items below differ from the C++ reference on purpose. Do not "fix" them to match C++ unless explicitly asked. Wire compatibility with the Scrutiny server is preserved in all cases.
+
+### Architecture adaptations
+
+- The timebase is passed by argument on each call that needs it (e.g. `CommHandler::process(&Timebase)`) instead of being held by reference from init.
+- The communication buffers are owned (borrowed for the handler lifetime) by `MainHandler`, not by `CommHandler`. `CommHandler` receives the RX/TX slices as call arguments.
+- `MainHandler` and `CommHandler` interact through request metadata `(cmd, subfn, len)` and `active_response_mut()` instead of shared `Request`/`Response` pointers, to satisfy lifetime constraints.
+- `Config` is consumed by `MainHandler::new()`, which returns `None` when buffers are missing. C++ copies the config and returns a disabled object with `Status::ERROR`.
+- The datalogger lives in a `DataLoggerCell` owned by `MainHandler`; its address is transferred to the owning loop through the `TakeOwnership` IPC message, together with the RPV array and read callback.
+
+### Features not ported
+
+- No C wrapper (`cwrapper/`) and no CMake post-build tooling (`scrutiny_postbuild`, SFD generation, firmware tagging integration).
+- `MainHandler` and `LoopHandler` does not expose the exact same public API because some internal components have restricted visibility.
+- IPC uses a single `AtomicFlag` implementation (`StdAtomicFlag`, `AtomicBool`). The C++ per-platform IPC variants (AVR, TI C28, TriCore, x86) are not ported. The `LoopIpcFlag` alias in `ipc.rs` is the single place to change it.
+- No `boolean16`, `boolean32`, `boolean64` variable types: a Rust `bool` is always 1 byte. Datalogging configurations using them are rejected with `InvalidRequest`.
+- No `CHAR_BIT != 8` support (`GetParams` always reports `char_bit = 8`).
+- No `SCRUTINY_DATALOGGING_BUFFER_32BITS` option: buffer sizes are `usize` and saturated to `u32` on the wire.
+
+### Behavior differences
+
+- **Datalogger ownership during reads**: `GetAcquisitionMetadata` and `ReadAcquisition` first request the owning loop to release the datalogger (returning `ProcessAgain` until released) while keeping the acquisition data. Consequences:
+  - The owning loop must run within `REQUEST_MAX_PROCESS_TIME_US` (100 ms) or the request fails with `FailureToProceed`.
+  - After a read, `ArmTrigger`/`DisarmTrigger` fail until the next `ConfigureDatalog`. The server always resets and reconfigures after a read, so this is compatible.
+  - `ReadAcquisition` does not require an owner (C++ returns `FailureToProceed` without one).
+- `DataAcquired` IPC messages update the main handler's cached datalogger state (C++ ignores them).
+- Boolean values are read through the `uint8` union field, never through `bool`, because the byte may hold any value. In trigger comparisons any nonzero byte compares as 1; in acquisitions the raw byte is logged as-is.
+- The trigger callback receives `Option<&'static str>` (the owning loop name) and the RPV read callback receives the loop name as caller, instead of a `LoopHandler*`.
+- The session counter is per `CommHandler` instance (C++ uses a static shared by all instances).
+
+---
+
 ## Testing
 
 - Each module must have unit tests covering its behavior, compiled only under the `std` feature.

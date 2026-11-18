@@ -352,7 +352,7 @@ fn test_special_memory_region_location_wrong_index() {
 fn rpv_read_cb(_rpv: RuntimePublishedValue, _out: &mut AnyType, _caller: Option<&'static str>) -> bool {
     true
 }
-fn rpv_write_cb(_rpv: RuntimePublishedValue, _in: &AnyType) -> bool {
+fn rpv_write_cb(_rpv: RuntimePublishedValue, _in: &AnyType, _caller: Option<&'static str>) -> bool {
     true
 }
 

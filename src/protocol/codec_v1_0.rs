@@ -852,7 +852,7 @@ pub fn encode_response_memory_control_write_rpv(
             return Err(ResponseCode::Overflow);
         }
 
-        if !write_cb(rpv, &val) {
+        if !write_cb(rpv, &val, None) {
             return Err(ResponseCode::FailureToProceed);
         }
 

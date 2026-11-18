@@ -11,7 +11,9 @@ use crate::types::AddressRange;
 pub type RpvReadCallback = fn(RuntimePublishedValue, &mut AnyType, Option<&'static str>) -> bool;
 
 /// Callback to write a Runtime Published Value.
-pub type RpvWriteCallback = fn(RuntimePublishedValue, &AnyType) -> bool;
+///
+/// `caller` mirrors `RpvReadCallback`. It is always `None` since writes are only performed by the main handler.
+pub type RpvWriteCallback = fn(RuntimePublishedValue, &AnyType, Option<&'static str>) -> bool;
 
 /// Callback for the `UserCommand` service.
 ///
@@ -364,7 +366,7 @@ mod tests {
             true
         }
         #[allow(clippy::trivially_copy_pass_by_ref)] // Signature imposed by RpvWriteCallback.
-        fn write_cb(_rpv: RuntimePublishedValue, _in: &AnyType) -> bool {
+        fn write_cb(_rpv: RuntimePublishedValue, _in: &AnyType, _caller: Option<&'static str>) -> bool {
             true
         }
 

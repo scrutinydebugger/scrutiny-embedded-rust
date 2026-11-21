@@ -5,7 +5,7 @@ set -euo pipefail
 APP_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )"/.. >/dev/null 2>&1 && pwd )"
 
 TESTAPPS_REPO=${TESTAPPS_REPO:-https://github.com/scrutinydebugger/scrutiny-testapps}
-TESTAPPS_BRANCH=${TESTAPPS_BRANCH:-rust-testapp}
+TESTAPPS_BRANCH=${TESTAPPS_BRANCH:-master}
 
 LIB_GIT_URL="https://github.com/scrutinydebugger/scrutiny-embedded-rust"
 LIB_NAME="scrutiny-embedded-rust"

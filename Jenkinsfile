@@ -445,6 +445,18 @@ pipeline {
                 }
             }
         }
+        stage('rust-testapp'){
+            agent {
+                dockerfile {
+                    additionalBuildArgs '--target native'
+                    args '-e HOME=/tmp -e BUILD_CONTEXT=testapp'
+                    reuseNode true
+                }
+            }
+            steps {
+                sh 'scripts/build_testapp.sh'
+            }
+        }
     }
     post {
         // Clean after build

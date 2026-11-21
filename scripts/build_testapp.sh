@@ -13,8 +13,7 @@ TESTAPP_DIR=$(mktemp -d)
 trap 'rm -rf "$TESTAPP_DIR"' EXIT
 
 set -x
-git clone --depth 1 --filter=blob:none --sparse --branch "$TESTAPPS_BRANCH" "$TESTAPPS_REPO" "$TESTAPP_DIR"
-git -C "$TESTAPP_DIR" sparse-checkout set rust-testapp
+git clone --depth 1 --branch "$TESTAPPS_BRANCH" "$TESTAPPS_REPO" "$TESTAPP_DIR"
 cd "$TESTAPP_DIR/rust-testapp"
 
 # The testapp depends on the library through git. Redirect it to this checkout.
@@ -24,7 +23,7 @@ FEATURES="$LIB_NAME/datalogging,$LIB_NAME/support_64bits,$LIB_NAME/protected_reg
 cargo build --config "$PATCH_ARG" --features "$FEATURES"
 
 # A [patch] that does not match is only a warning, the build would silently use the GitHub version.
-if ! cargo tree --config "$PATCH_ARG" --features "$FEATURES" -p "$LIB_NAME" --depth 0 | grep -qF "($APP_ROOT)"; then
+if ! cargo tree --config "$PATCH_ARG" -p "$LIB_NAME" --depth 0 | grep -qF "($APP_ROOT)"; then
     echo "rust-testapp was not built against the local library at $APP_ROOT"
     exit 1
 fi

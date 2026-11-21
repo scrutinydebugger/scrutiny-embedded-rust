@@ -5,22 +5,17 @@ set -euo pipefail
 APP_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )"/.. >/dev/null 2>&1 && pwd )"
 
 TESTAPPS_REPO=${TESTAPPS_REPO:-https://github.com/scrutinydebugger/scrutiny-testapps}
-TESTAPPS_BRANCH=${TESTAPPS_BRANCH:-master}
-BUILD_CONTEXT=${BUILD_CONTEXT:-testapp}
+TESTAPPS_BRANCH=${TESTAPPS_BRANCH:-rust-testapp}
 
 LIB_GIT_URL="https://github.com/scrutinydebugger/scrutiny-embedded-rust"
 LIB_NAME="scrutiny-embedded-rust"
-WORK_DIR="$APP_ROOT/target/ci-$BUILD_CONTEXT"
-TESTAPPS_DIR="$WORK_DIR/scrutiny-testapps"
-TESTAPP_DIR="$TESTAPPS_DIR/rust-testapp"
+TESTAPP_DIR=$(mktemp -d)
+trap 'rm -rf "$TESTAPP_DIR"' EXIT
 
 set -x
-
-rm -rf "$TESTAPPS_DIR"
-mkdir -p "$WORK_DIR"
-git clone --depth 1 --branch "$TESTAPPS_BRANCH" "$TESTAPPS_REPO" "$TESTAPPS_DIR"
-
-cd "$TESTAPP_DIR"
+git clone --depth 1 --filter=blob:none --sparse --branch "$TESTAPPS_BRANCH" "$TESTAPPS_REPO" "$TESTAPP_DIR"
+git -C "$TESTAPP_DIR" sparse-checkout set rust-testapp
+cd "$TESTAPP_DIR/rust-testapp"
 
 # The testapp depends on the library through git. Redirect it to this checkout.
 PATCH_ARG="patch.\"$LIB_GIT_URL\".$LIB_NAME.path=\"$APP_ROOT\""
